@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block body %}
+<h2>Weekly Digest (since {{ since }})</h2>
+<p class="hint">This page is the email body preview; scripts/send_digest.py mails it on a cron once SMTP_* env vars are set.</p>
+<div class="cols">
+<div class="card"><h3>Status changes ({{ changes|length }})</h3>
+<table class="list">{% for r in changes %}<tr><td class="sub2">{{ r.ts[:10] }}</td><td><b>{{ r.avl_name }}</b></td><td>{{ r.product }}</td><td>{{ r.old_status or '-' }} → <b>{{ r.new_status }}</b></td></tr>{% else %}<tr><td class="hint">None.</td></tr>{% endfor %}</table></div>
+<div class="card"><h3>Calls held ({{ calls|length }})</h3>
+<table class="list">{% for r in calls %}<tr><td class="sub2">{{ r.call_date }}</td><td><b>{{ r.avl_name }}</b></td><td>{{ r.call_type }}</td><td>{{ r.topics }}</td></tr>{% else %}<tr><td class="hint">None.</td></tr>{% endfor %}</table>
+<h3>Overdue actions ({{ overdue|length }})</h3>
+<table class="list">{% for r in overdue %}<tr class="overdue"><td>{{ r.due_date }}</td><td>{{ r.description }}</td><td>{{ r.avl_name or '-' }}</td><td>{{ r.owner }}</td></tr>{% else %}<tr><td class="hint">None - nice.</td></tr>{% endfor %}</table></div>
+</div>{% endblock %}

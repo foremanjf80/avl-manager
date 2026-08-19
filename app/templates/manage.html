@@ -1,0 +1,44 @@
+{% extends "base.html" %}{% block body %}
+<div class="cols">
+<div class="card"><h2>Products</h2>
+<table class="list"><tr><th>Name</th><th>Category</th><th>Prod/Tech reps</th><th>Lifecycle / target</th><th></th></tr>
+{% for p in products %}<tr class="{{ 'inactive' if not p.active }}">
+<td>{{ p.name }}</td><td>{{ p.category }}</td>
+<td><form method="post" action="/products/{{ p.id }}/reps" class="inline">
+<input name="tech_reps" value="{{ p.tech_reps }}"><button>Save</button></form></td>
+<td><form method="post" action="/products/{{ p.id }}/lifecycle" class="inline">
+<select name="lifecycle"><option {% if p.lifecycle=='Roadmap' %}selected{% endif %}>Roadmap</option>
+<option {% if p.lifecycle=='Active' %}selected{% endif %}>Active</option>
+<option {% if p.lifecycle=='EOL' %}selected{% endif %}>EOL</option></select>
+<input name="launch_status" value="{{ p.launch_status }}" size="9" placeholder="Q4-26 / date">
+<button>Set</button></form></td>
+<td><form method="post" action="/products/{{ p.id }}/toggle" class="inline"><button>{{ 'Remove' if p.active else 'Restore' }}</button></form></td>
+</tr>{% endfor %}</table>
+<h3>Add product</h3>
+<form method="post" action="/products/add" class="row">
+<input name="name" placeholder="Product name" required>
+<select name="category"><option>DC Module</option><option>AC Module</option><option>MLPE</option><option>ESS</option></select>
+<input name="tech_reps" placeholder="Prod/Tech reps">
+<select name="lifecycle"><option>Roadmap</option><option selected>Active</option></select>
+<input name="launch_status" placeholder="Released / target Q4-26">
+<button>Add</button></form></div>
+
+<div class="card"><h2>TPO AVLs</h2>
+<table class="list"><tr><th>AVL</th><th>Account Manager</th><th>Sr. Commercial Rep</th><th></th></tr>
+{% for a in avls %}<tr class="{{ 'inactive' if not a.active }}">
+<td>{{ a.name }}</td>
+<td colspan="2"><form method="post" action="/avls/{{ a.id }}/managers" class="inline">
+<input name="account_manager" value="{{ a.account_manager }}" placeholder="Account Manager">
+<input name="sr_commercial_rep" value="{{ a.sr_commercial_rep }}" placeholder="Sr. Commercial Rep">
+<button>Save</button></form></td>
+<td><form method="post" action="/avls/{{ a.id }}/toggle" class="inline"><button>{{ 'Remove' if a.active else 'Restore' }}</button></form></td>
+</tr>{% endfor %}</table>
+<h3>Add AVL</h3>
+<form method="post" action="/avls/add" class="row">
+<input name="name" placeholder="TPO / AVL name" required>
+<input name="account_manager" placeholder="Account Manager">
+<input name="sr_commercial_rep" placeholder="Sr. Commercial Rep">
+<button>Add</button></form></div>
+</div>
+<p class="hint">Lifecycle: Roadmap = future launch (target date in the field), Active = on market, EOL = end of life (hidden from the matrix by default, history retained). Remove = soft delete for mistakes. Product/Technical reps ride the product; AM and Sr. Commercial Rep ride the AVL account, matching the trifecta model.</p>
+{% endblock %}

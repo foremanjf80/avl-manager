@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block body %}
+<h2>Admin</h2>
+<div class="cols">
+<div class="card"><h3>Users & roles</h3>
+<table class="list"><tr><th>Email</th><th>Name</th><th>Role</th><th>Last login</th></tr>
+{% for u in users %}<tr><td>{{ u.email }}</td><td>{{ u.name }}</td>
+<td><form method="post" action="/admin/role" class="inline"><input type="hidden" name="email" value="{{ u.email }}">
+<select name="role"><option {% if u.role=='viewer' %}selected{% endif %}>viewer</option>
+<option {% if u.role=='editor' %}selected{% endif %}>editor</option>
+<option {% if u.role=='admin' %}selected{% endif %}>admin</option></select><button>Set</button></form></td>
+<td class="sub2">{{ u.last_login }}</td></tr>{% endfor %}</table>
+<p class="hint">viewer = read-only (good for execs), editor = can update, admin = this page. First user to sign in became admin; ADMIN_EMAILS env var also grants admin.</p></div>
+<div class="card"><h3>Backup</h3>
+<a class="btn" href="/admin/backup">Download database backup</a>
+<p class="hint">Also see scripts/backup.sh for a nightly cron that keeps 30 rolling copies.</p>
+<h3>Auth</h3><p>Current mode: <b>{{ auth_mode }}</b>. For production set AUTH_MODE=oidc (Entra app registration) or easyauth (Azure App Service built-in auth). See README.</p></div>
+</div>{% endblock %}

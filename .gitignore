@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# App data - never commit
+avl.db
+old.db
+data_uploads/
+backups/
+.env
+*Zone.Identifier

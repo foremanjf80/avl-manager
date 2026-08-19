@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block body %}
+<h2>Action Items</h2>
+<div class="card"><h3>Add action</h3>
+<form method="post" action="/actions/add" class="row">
+<input name="description" placeholder="What needs to happen" size="40" required>
+<select name="avl_id"><option value="">- TPO (optional) -</option>{% for a in avls %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select>
+<input name="owner" placeholder="Owner">
+<input name="due_date" type="date">
+<button>Add</button></form></div>
+<p><a href="/actions?show=open" class="{{ 'hint' if show=='all' }}">Open</a> | <a href="/actions?show=all" class="{{ 'hint' if show=='open' }}">All</a></p>
+<table class="list"><tr><th>Due</th><th>Action</th><th>TPO</th><th>Owner</th><th>Status</th><th>By</th><th></th></tr>
+{% for r in rows %}<tr class="{{ 'overdue' if r.status=='Open' and r.due_date and r.due_date < today }}">
+<td>{{ r.due_date or '-' }}</td><td>{{ r.description }}</td><td>{{ r.avl_name or '-' }}</td>
+<td>{{ r.owner }}</td><td>{{ r.status }}</td><td class="sub2">{{ r.created_by }}</td>
+<td>{% if r.status=='Open' %}<form method="post" action="/actions/{{ r.id }}/done" class="inline"><button>Done</button></form>{% else %}<span class="sub2">{{ r.closed_at[:10] if r.closed_at }}</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="7" class="hint">Nothing here.</td></tr>{% endfor %}</table>
+<p class="hint">Red rows are overdue. Actions can also be added from a logged call's follow-ups.</p>
+{% endblock %}

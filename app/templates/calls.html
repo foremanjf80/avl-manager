@@ -1,0 +1,30 @@
+{% extends "base.html" %}{% block body %}
+<div class="row" style="justify-content:space-between"><h2>Interaction Log</h2><a class="btn small" href="/export/calls.csv">CSV</a></div>
+<div class="card"><h3>Log a call</h3>
+<form method="post" action="/calls/add" class="row">
+<select name="avl_id" required>{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
+<input name="call_date" type="date" required>
+<select name="call_type"><option>Joint</option><option>Technical</option><option>Commercial</option><option>Intro</option><option>QBR</option></select>
+<input name="qcells_attendees" placeholder="Qcells attendees (AM, Sr. Comm, Prod/Tech)" size="34">
+<input name="tpo_attendees" placeholder="TPO attendees" size="22">
+</form>
+<form method="post" action="/calls/add" class="row" id="row2"></form>
+<script>
+// merge second row inputs into the same form
+const f=document.querySelector('form[action="/calls/add"]');
+['topics','outcomes','owner_due'].forEach((n,i)=>{
+ const inp=document.createElement('input');inp.name=n;inp.size=n=='owner_due'?18:44;
+ inp.placeholder=['Topics covered','Outcomes / next steps','Owner / due'][i];f.appendChild(inp);});
+const b=document.createElement('button');b.textContent='Log call';f.appendChild(b);
+</script></div>
+<div class="row" style="margin:8px 0">
+<form method="get" action="/calls">Filter:
+<select name="avl" onchange="this.form.submit()"><option value="0">All TPOs</option>
+{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
+</select></form></div>
+<table class="list"><tr><th>Date</th><th>TPO</th><th>Type</th><th>Qcells attendees</th><th>TPO attendees</th><th>Topics</th><th>Outcomes / next steps</th><th>Owner / due</th><th>Logged by</th></tr>
+{% for r in rows %}<tr><td>{{ r.call_date }}</td><td><b>{{ r.avl_name }}</b></td><td>{{ r.call_type }}</td>
+<td>{{ r.qcells_attendees }}</td><td>{{ r.tpo_attendees }}</td><td>{{ r.topics }}</td>
+<td>{{ r.outcomes }}</td><td>{{ r.owner_due }}</td><td class="sub2">{{ r.created_by }}</td></tr>
+{% else %}<tr><td colspan="9" class="hint">No calls logged yet.</td></tr>{% endfor %}</table>
+{% endblock %}

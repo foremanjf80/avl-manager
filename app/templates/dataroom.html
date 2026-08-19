@@ -1,0 +1,26 @@
+{% extends "base.html" %}{% block body %}
+<h2>Dataroom / AVL Requirements Checklist</h2>
+<form method="get" action="/dataroom" class="row" style="margin-bottom:10px">
+<select name="product" onchange="this.form.submit()">{% for p in products %}<option value="{{ p.id }}" {% if p.id==sel_p %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+<b>@</b>
+<select name="avl" onchange="this.form.submit()">{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel_a %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
+</form>
+{% if not items %}
+<div class="card"><p class="hint">No checklist yet for this product x TPO.</p>
+<form method="post" action="/dataroom/seed">
+<input type="hidden" name="product_id" value="{{ sel_p }}"><input type="hidden" name="avl_id" value="{{ sel_a }}">
+<button>Load standard workstreams (G4-ESS tracker template)</button></form></div>
+{% else %}
+<table class="list"><tr><th>Workstream</th><th>Status</th><th>%</th><th>ETA</th><th>Owner</th><th>Notes</th><th></th></tr>
+{% for i in items %}<tr>
+<td><b>{{ i.workstream }}</b><div class="sub2">{{ i.updated_by }} {{ i.updated_at[:10] if i.updated_at }}</div></td>
+<form method="post" action="/dataroom/{{ i.id }}">
+<td><select name="status" class="cs-{{ i.status|replace(' ','') }}">{% for st in check_statuses %}<option {% if i.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select></td>
+<td><input name="pct" value="{{ i.pct }}" size="4"></td>
+<td><input name="eta" value="{{ i.eta }}" size="9"></td>
+<td><input name="owner" value="{{ i.owner }}" size="12"></td>
+<td><input name="notes" value="{{ i.notes }}" size="46"></td>
+<td><button>Save</button></td></form></tr>
+{% endfor %}</table>
+{% endif %}
+{% endblock %}

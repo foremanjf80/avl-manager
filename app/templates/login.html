@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block body %}
+<div class="card narrow"><h2>Sign in</h2>
+{% if request.query_params.get('error') %}<p class="err">Only @{{ domain }} accounts are allowed.</p>{% endif %}
+{% if mode == 'dev' %}
+<form method="post" action="/login/dev">
+<label>Name <input name="name" required></label>
+<label>Email <input name="email" type="email" placeholder="you@{{ domain }}" required></label>
+<button>Sign in (dev mode)</button></form>
+<p class="hint">Dev mode: no password, domain still enforced. Set AUTH_MODE=oidc for real SSO.</p>
+{% else %}<a class="btn" href="/login/sso">Sign in with company SSO</a>{% endif %}
+</div>{% endblock %}

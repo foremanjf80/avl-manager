@@ -1,0 +1,31 @@
+{% extends "base.html" %}{% block body %}
+<div class="row" style="justify-content:space-between;align-items:center">
+<h2>Executive Summary - {{ month }}</h2>
+<form method="get" action="/exec"><select name="month" onchange="this.form.submit()">
+{% for m in months %}<option {% if m==month %}selected{% endif %}>{{ m }}</option>{% endfor %}
+{% if month not in months %}<option selected>{{ month }}</option>{% endif %}
+</select> <button onclick="window.print();return false;">Print / PDF</button></form></div>
+<div class="kpis">
+<div class="kpi"><div class="n">{{ changes|length }}</div>Status changes</div>
+<div class="kpi win"><div class="n">{{ wins|length }}</div>New listings</div>
+<div class="kpi risk"><div class="n">{{ risks|length }}</div>Removals / declines</div>
+<div class="kpi"><div class="n">{{ n_calls }}</div>TPO calls held</div>
+</div>
+<div class="cols">
+<div class="card"><h3>Movement this month</h3>
+<table class="list"><tr><th>TPO AVL</th><th>Product</th><th>From</th><th>To</th></tr>
+{% for r in changes %}<tr><td><b>{{ r.avl_name }}</b></td><td>{{ r.product }}</td><td>{{ r.old_status or '-' }}</td><td><b>{{ r.new_status }}</b></td></tr>
+{% else %}<tr><td colspan="4" class="hint">No changes this month.</td></tr>{% endfor %}</table></div>
+<div class="card"><h3>Engagement this month</h3>
+<table class="list"><tr><th>TPO AVL</th><th>Calls</th></tr>
+{% for r in calls_month %}<tr><td>{{ r.avl_name }}</td><td>{{ r.n }}</td></tr>
+{% else %}<tr><td colspan="2" class="hint">No calls logged this month.</td></tr>{% endfor %}</table>
+<h3>Current portfolio position</h3>
+<table class="list"><tr><th>Status</th><th>Cells</th></tr>
+{% for r in counts %}<tr><td>{{ r.status }}</td><td>{{ r.n }}</td></tr>{% endfor %}</table></div>
+</div>
+<div class="card"><h3>Listed coverage by TPO (active products)</h3>
+<table class="list"><tr><th>TPO AVL</th><th>Listed</th><th>Tracked</th><th>Coverage</th></tr>
+{% for r in listed_by_avl %}<tr><td><b>{{ r.name }}</b></td><td>{{ r.listed }}</td><td>{{ r.total }}</td>
+<td>{{ (100*r.listed/r.total)|round(0)|int if r.total else 0 }}%</td></tr>{% endfor %}</table></div>
+{% endblock %}

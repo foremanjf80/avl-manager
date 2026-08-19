@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block body %}
+<h2>Attachments</h2>
+<div class="card"><h3>Upload</h3>
+<form method="post" action="/files/upload" enctype="multipart/form-data" class="row" id="upf">
+<select name="kind" id="kindsel" onchange="pick()"><option value="product">Product</option><option value="avl">TPO AVL</option><option value="call">Call</option></select>
+<select name="ref_id" id="ref_product">{% for p in products %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
+<select name="ref_id" id="ref_avl" disabled style="display:none">{% for a in avls %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select>
+<select name="ref_id" id="ref_call" disabled style="display:none">{% for cl in calls %}<option value="{{ cl.id }}">{{ cl.avl_name }} {{ cl.call_date }}</option>{% endfor %}</select>
+<input type="file" name="f" required><button>Upload</button></form>
+<script>function pick(){const k=document.getElementById('kindsel').value;
+['product','avl','call'].forEach(x=>{const el=document.getElementById('ref_'+x);
+const on=(x===k);el.disabled=!on;el.style.display=on?'':'none';});}</script></div>
+<table class="list"><tr><th>File</th><th>Attached to</th><th>By</th><th>When</th></tr>
+{% for a in atts %}<tr><td><a href="/files/{{ a.id }}/download">{{ a.filename }}</a></td>
+<td>{{ a.kind }}: {{ names[a.kind].get(a.ref_id, '#'~a.ref_id) }}</td>
+<td class="sub2">{{ a.uploaded_by }}</td><td class="sub2">{{ a.uploaded_at[:16] }}</td></tr>
+{% else %}<tr><td colspan="4" class="hint">No files yet. Certs, datasheets, TPO requirement docs, meeting decks all belong here.</td></tr>{% endfor %}</table>
+{% endblock %}

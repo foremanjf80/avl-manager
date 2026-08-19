@@ -1,0 +1,39 @@
+{% extends "base.html" %}{% block body %}
+<h2>Key Account Team - Trifecta Assignments</h2>
+<div class="cols">
+<div class="card"><h3>Assign someone</h3>
+<form method="post" action="/team/assign" class="row">
+<select name="person_id" required>{% for p in people %}<option value="{{ p.id }}">{{ p.name }}{% if p.org %} ({{ p.org }}){% endif %}</option>{% endfor %}</select>
+<select name="role" required>{% for r in roles %}<option>{{ r }}</option>{% endfor %}</select>
+<select name="avl_id"><option value="">- AVL (optional) -</option>{% for a in avls %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select>
+<select name="product_id"><option value="">- Product (optional) -</option>{% for p in products %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
+<button>Assign</button></form>
+<p class="hint">Pick an AVL, a product line, or both (e.g. Prod/Tech rep for Gen4 ESS at EnFin specifically). At least one is required.</p>
+<h3>Add a person</h3>
+<form method="post" action="/team/person/add" class="row">
+<input name="name" placeholder="Full name" required>
+<input name="email" placeholder="email@qcells.com">
+<select name="org"><option>Sales</option><option>Products / CE</option><option>Other</option></select>
+<button>Add</button></form></div>
+
+<div class="card"><h3>Coverage by TPO account</h3>
+<table class="list"><tr><th>TPO AVL</th>{% for r in roles %}<th>{{ r.split(' (')[0] }}</th>{% endfor %}</tr>
+{% for avl, m in cov.items() %}<tr><td><b>{{ avl }}</b></td>
+{% for r in roles %}<td>{{ m.get(r, [])|join(', ') or '-' }}</td>{% endfor %}</tr>
+{% else %}<tr><td colspan="4" class="hint">No AVL-level assignments yet.</td></tr>{% endfor %}</table>
+<p class="hint">Gaps show as "-": those are the seats to fill per the three-person team structure.</p></div>
+</div>
+
+<div class="card"><h3>Current assignments</h3>
+<table class="list"><tr><th>Person</th><th>Role</th><th>TPO AVL</th><th>Product line</th><th>Since</th><th></th></tr>
+{% for r in current %}<tr><td><b>{{ r.person }}</b></td><td>{{ r.role }}</td>
+<td>{{ r.avl_name or 'All' }}</td><td>{{ r.product_name or 'All' }}</td><td class="sub2">{{ r.started_at[:10] }}</td>
+<td><form method="post" action="/team/assign/{{ r.id }}/end" class="inline"><button>Remove</button></form></td></tr>
+{% endfor %}</table></div>
+
+{% if past %}<div class="card"><h3>Past assignments (history)</h3>
+<table class="list"><tr><th>Person</th><th>Role</th><th>TPO AVL</th><th>Product line</th><th>From</th><th>To</th></tr>
+{% for r in past %}<tr><td>{{ r.person }}</td><td>{{ r.role }}</td><td>{{ r.avl_name or 'All' }}</td>
+<td>{{ r.product_name or 'All' }}</td><td class="sub2">{{ r.started_at[:10] }}</td><td class="sub2">{{ r.ended_at[:10] }}</td></tr>
+{% endfor %}</table></div>{% endif %}
+{% endblock %}
