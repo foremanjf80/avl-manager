@@ -1,0 +1,83 @@
+{% extends "base.html" %}{% block body %}
+<h2>Workstream Templates</h2>
+<p class="hint">A template is a reusable list of due-diligence requirements, scoped to a product type
+and optionally to a single TPO. The Dataroom page offers the best-matching templates when you seed a
+product &times; TPO checklist.</p>
+{% if request.query_params.get('err') == 'dup' %}<p class="hint" style="color:#b00">A template with that name already exists.</p>{% endif %}
+
+<div class="cols">
+<div class="card"><h3>Library</h3>
+<table class="list"><tr><th>Template</th><th>Product type</th><th>AVL</th><th>Items</th><th></th></tr>
+{% for t in tmpls %}<tr class="{{ 'inactive' if not t.active }}{{ ' sel' if cur and t.id==cur.id }}">
+<td><a href="/workstreams?t={{ t.id }}"><b>{{ t.name }}</b></a></td>
+<td>{{ t.category or 'Any' }}</td><td>{{ t.avl_name or 'All' }}</td><td>{{ t.n_items }}</td>
+<td><form method="post" action="/workstreams/{{ t.id }}/toggle" class="inline"><button>{{ 'Retire' if t.active else 'Restore' }}</button></form></td>
+</tr>{% endfor %}</table>
+
+<h3>New template</h3>
+<form method="post" action="/workstreams/add" class="row">
+<input name="name" placeholder="Template name" required>
+<select name="category"><option value="">Any product type</option>
+{% for cat in categories %}<option value="{{ cat }}">{{ cat }}</option>{% endfor %}</select>
+<select name="avl_id"><option value="">All AVLs</option>
+{% for a in avls %}<option value="{{ a.id }}">{{ a.name }} only</option>{% endfor %}</select>
+<select name="copy_from"><option value="">Start empty</option>
+{% for t in tmpls %}<option value="{{ t.id }}">Copy from: {{ t.name }}</option>{% endfor %}</select>
+<input name="notes" placeholder="Notes" size="18">
+<input name="source_url" placeholder="Source sheet URL" size="18">
+<button>Create</button></form>
+<p class="hint">Copy from an existing template when a TPO wants the standard list plus a few extras &mdash;
+create it scoped to that AVL, then add the extras below.</p></div>
+
+{% if cur %}
+<div class="card"><h3>{{ cur.name }}</h3>
+<form method="post" action="/workstreams/{{ cur.id }}/edit" class="row">
+<input name="name" value="{{ cur.name }}" required>
+<select name="category"><option value="" {% if not cur.category %}selected{% endif %}>Any product type</option>
+{% for cat in categories %}<option value="{{ cat }}" {% if cur.category==cat %}selected{% endif %}>{{ cat }}</option>{% endfor %}</select>
+<select name="avl_id"><option value="" {% if not cur.avl_id %}selected{% endif %}>All AVLs</option>
+{% for a in avls %}<option value="{{ a.id }}" {% if cur.avl_id==a.id %}selected{% endif %}>{{ a.name }} only</option>{% endfor %}</select>
+<input name="notes" value="{{ cur.notes }}" size="24" placeholder="Notes">
+<input name="source_url" value="{{ cur.source_url }}" size="24" placeholder="Source sheet URL">
+<button>Save scope</button></form>
+{% if cur.source_url %}<p class="hint">Source: <a href="{{ cur.source_url }}" target="_blank" rel="noopener">{{ cur.source_url }}</a></p>{% endif %}
+
+<table class="list"><tr><th>#</th><th>Document category</th><th>Required document</th><th>Obligation</th><th>Notes</th><th></th><th></th></tr>
+{% for i in items %}<tr>{% if loop.changed(i.doc_category) %}{% endif %}
+<form method="post" action="/workstreams/items/{{ i.id }}/save">
+<td><input name="sort_order" value="{{ i.sort_order }}" size="2"></td>
+<td><input name="doc_category" value="{{ i.doc_category }}" size="20" list="dcats"></td>
+<td><input name="workstream" value="{{ i.workstream }}" size="40" required></td>
+<td><select name="obligation">{% for ob in obligations %}<option {% if i.obligation==ob %}selected{% endif %}>{{ ob }}</option>{% endfor %}</select></td>
+<td><input name="description" value="{{ i.description }}" size="28" placeholder="Notes"></td>
+<td><button>Save</button></td></form>
+<td><form method="post" action="/workstreams/items/{{ i.id }}/delete" class="inline"
+      onsubmit="return confirm('Remove this requirement from the template?')"><button>&times;</button></form></td>
+</tr>{% else %}<tr><td colspan="7" class="hint">No requirements yet &mdash; add the first one below.</td></tr>{% endfor %}</table>
+<datalist id="dcats">{% for dc in doc_cats %}<option value="{{ dc }}">{% endfor %}</datalist>
+
+<h4>Add requirement</h4>
+<form method="post" action="/workstreams/{{ cur.id }}/items/add" class="row">
+<input name="doc_category" placeholder="Document category" size="20" list="dcats">
+<input name="workstream" placeholder="Required document" size="40" required>
+<select name="obligation">{% for ob in obligations %}<option>{{ ob }}</option>{% endfor %}</select>
+<input name="description" placeholder="Notes" size="26">
+<button>Add</button></form>
+
+{% if usage %}
+<h4>In use</h4>
+<table class="list"><tr><th>AVL</th><th>Product</th><th>Rows seeded</th></tr>
+{% for u in usage %}<tr><td>{{ u.avl_name }}</td><td>{{ u.product }}</td><td>{{ u.n }}</td></tr>{% endfor %}</table>
+<p class="hint">Editing a template does not rewrite checklists already seeded &mdash; re-apply it from the
+Dataroom page (Merge) to push new requirements into a live checklist.</p>
+{% endif %}
+
+{% if user and user.get('role') == 'admin' %}
+<form method="post" action="/workstreams/{{ cur.id }}/delete" style="margin-top:10px"
+      onsubmit="return confirm('Permanently delete this template and its requirements?')">
+<button>Delete template</button></form>
+{% endif %}
+</div>
+{% endif %}
+</div>
+{% endblock %}

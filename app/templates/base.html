@@ -6,8 +6,11 @@
 <nav>{% set path = request.url.path %}
 <a href="/" class="{{ 'active' if path == '/' }}">Dashboard</a>
 <a href="/calls" class="{{ 'active' if path.startswith('/calls') }}">Calls</a>
+<a href="/contacts" class="{{ 'active' if path.startswith('/contacts') }}">Contacts</a>
 <a href="/actions" class="{{ 'active' if path.startswith('/actions') }}">Actions</a>
-<a href="/dataroom" class="{{ 'active' if path.startswith('/dataroom') }}">Dataroom</a>
+<a href="/dataroom" class="{{ 'active' if path.startswith('/dataroom') and not path.startswith('/dataroom/package') }}">Dataroom</a>
+<a href="/dataroom/package" class="{{ 'active' if path.startswith('/dataroom/package') }}">Package</a>
+<a href="/workstreams" class="{{ 'active' if path.startswith('/workstreams') }}">Workstreams</a>
 <a href="/team" class="{{ 'active' if path.startswith('/team') }}">Team</a>
 <a href="/history" class="{{ 'active' if path.startswith('/history') }}">History</a>
 <a href="/exec" class="{{ 'active' if path.startswith('/exec') }}">Exec</a>

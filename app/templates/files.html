@@ -1,18 +1,77 @@
 {% extends "base.html" %}{% block body %}
 <h2>Attachments</h2>
+
 <div class="card"><h3>Upload</h3>
 <form method="post" action="/files/upload" enctype="multipart/form-data" class="row" id="upf">
-<select name="kind" id="kindsel" onchange="pick()"><option value="product">Product</option><option value="avl">TPO AVL</option><option value="call">Call</option></select>
-<select name="ref_id" id="ref_product">{% for p in products %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
+<select name="kind" id="kindsel" onchange="pick()">
+{% if checks %}<option value="checklist">Workstream requirement</option>{% endif %}
+<option value="product">Product</option><option value="avl">TPO AVL</option><option value="call">Call</option></select>
+
+<span id="grp_checklist" {% if not checks %}style="display:none"{% endif %}>
+<select id="ck_avl" onchange="fillProd()"></select>
+<select id="ck_prod" onchange="fillWs()"></select>
+<select name="ref_id" id="ck_ws"></select>
+</span>
+<select name="ref_id" id="ref_product" disabled style="display:none">{% for p in products %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
 <select name="ref_id" id="ref_avl" disabled style="display:none">{% for a in avls %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select>
 <select name="ref_id" id="ref_call" disabled style="display:none">{% for cl in calls %}<option value="{{ cl.id }}">{{ cl.avl_name }} {{ cl.call_date }}</option>{% endfor %}</select>
 <input type="file" name="f" required><button>Upload</button></form>
-<script>function pick(){const k=document.getElementById('kindsel').value;
-['product','avl','call'].forEach(x=>{const el=document.getElementById('ref_'+x);
-const on=(x===k);el.disabled=!on;el.style.display=on?'':'none';});}</script></div>
-<table class="list"><tr><th>File</th><th>Attached to</th><th>By</th><th>When</th></tr>
-{% for a in atts %}<tr><td><a href="/files/{{ a.id }}/download">{{ a.filename }}</a></td>
-<td>{{ a.kind }}: {{ names[a.kind].get(a.ref_id, '#'~a.ref_id) }}</td>
-<td class="sub2">{{ a.uploaded_by }}</td><td class="sub2">{{ a.uploaded_at[:16] }}</td></tr>
-{% else %}<tr><td colspan="4" class="hint">No files yet. Certs, datasheets, TPO requirement docs, meeting decks all belong here.</td></tr>{% endfor %}</table>
+<p class="hint">Certs, IE reports, datasheets and TPO requirement docs belong on the workstream requirement
+they satisfy &mdash; they then show up inline on the <a href="/dataroom">Dataroom</a> checklist.
+A requirement only appears here once its checklist has been seeded.</p></div>
+
+<form method="get" action="/files" class="row" style="margin-bottom:10px">
+<select name="kind" onchange="this.form.submit()"><option value="">All attachments</option>
+{% for k, lbl in [('checklist','Workstream requirement'), ('product','Product'), ('avl','TPO AVL'), ('call','Call')] %}
+<option value="{{ k }}" {% if f_kind==k %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select>
+</form>
+
+<table class="list"><tr><th>File</th><th>Applies to</th><th>Re-file</th><th>By</th><th>When</th><th></th></tr>
+{% for a in atts %}<tr>
+<td><a href="/files/{{ a.id }}/download">{{ a.filename }}</a></td>
+<td>{{ names[a.kind].get(a.ref_id, '#' ~ a.ref_id) if a.kind in names else a.kind ~ '#' ~ a.ref_id }}</td>
+<td><form method="post" action="/files/{{ a.id }}/reassign" class="inline">
+<select name="target">
+<optgroup label="Workstream requirement (AVL / product)">{% for ck in checks %}<option value="checklist:{{ ck.id }}" {% if a.kind=='checklist' and a.ref_id==ck.id %}selected{% endif %}>{{ ck.avl_name }} / {{ ck.product }} &mdash; {% if ck.doc_category %}{{ ck.doc_category }}: {% endif %}{{ ck.workstream }}</option>{% endfor %}</optgroup>
+<optgroup label="Product (no specific requirement)">{% for p in products %}<option value="product:{{ p.id }}" {% if a.kind=='product' and a.ref_id==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</optgroup>
+<optgroup label="TPO AVL (no specific requirement)">{% for v in avls %}<option value="avl:{{ v.id }}" {% if a.kind=='avl' and a.ref_id==v.id %}selected{% endif %}>{{ v.name }}</option>{% endfor %}</optgroup>
+<optgroup label="Call">{% for cl in calls %}<option value="call:{{ cl.id }}" {% if a.kind=='call' and a.ref_id==cl.id %}selected{% endif %}>{{ cl.avl_name }} {{ cl.call_date }}</option>{% endfor %}</optgroup>
+</select><button>Move</button></form></td>
+<td class="sub2">{{ a.uploaded_by }}</td><td class="sub2">{{ a.uploaded_at[:16] }}</td>
+<td><form method="post" action="/files/{{ a.id }}/delete" class="inline"
+      onsubmit="return confirm('Delete this file permanently?')"><button>&times;</button></form></td></tr>
+{% else %}<tr><td colspan="6" class="hint">No files yet. Certs, datasheets, TPO requirement docs and meeting decks all belong here.</td></tr>{% endfor %}</table>
+
+<script>
+const P = {{ picker|tojson }};
+
+function opt(v, t){const o=document.createElement('option');o.value=v;o.textContent=t;return o;}
+
+function fillAvl(){
+  const s=document.getElementById('ck_avl'); s.innerHTML='';
+  P.avls.forEach(([id, name])=> s.appendChild(opt(id, name)));
+  fillProd();
+}
+function fillProd(){
+  const s=document.getElementById('ck_prod'); s.innerHTML='';
+  const byProd=P.tree[document.getElementById('ck_avl').value]||{};
+  Object.keys(byProd).forEach(pid=> s.appendChild(opt(pid, P.prods[pid]||('#'+pid))));
+  fillWs();
+}
+function fillWs(){
+  const s=document.getElementById('ck_ws'); s.innerHTML='';
+  const byProd=P.tree[document.getElementById('ck_avl').value]||{};
+  (byProd[document.getElementById('ck_prod').value]||[]).forEach(r=>
+    s.appendChild(opt(r.id, (r.cat ? r.cat + ': ' : '') + r.ws + ' [' + r.status + ']')));
+}
+function pick(){
+  const k=document.getElementById('kindsel').value, on=(k==='checklist');
+  document.getElementById('grp_checklist').style.display=on?'':'none';
+  document.getElementById('ck_ws').disabled=!on;
+  ['product','avl','call'].forEach(x=>{const el=document.getElementById('ref_'+x);
+    const sel=(x===k); el.disabled=!sel; el.style.display=sel?'':'none';});
+}
+
+fillAvl(); pick();
+</script>
 {% endblock %}

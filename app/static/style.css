@@ -42,3 +42,26 @@ tr.inactive{opacity:.45}
 tr.overdue{background:#fdeeee}tr.overdue td:first-child{color:#b00020;font-weight:bold}
 select.cs-Blocked{background:#F8CBAD}select.cs-InProgress{background:#BDD7EE}
 select.cs-Complete{background:#C6EFCE}select.cs-NotStarted{background:#EDEDED}
+tr.sel td{background:#eef6fc}
+tr.attrow td{border-top:0;padding-top:2px;padding-bottom:8px}
+tr.attrow input[type=file]{font-size:11px}
+h3.grp{margin:18px 0 4px;padding-bottom:4px;border-bottom:2px solid var(--navy);font-size:15px}
+h3.grp .sub2{margin-left:10px;font-weight:normal}
+.ob{font-size:10px;padding:1px 5px;border-radius:3px;white-space:nowrap}
+.ob-Required{background:#fde8e8;color:#a02020}
+.ob-Conditional{background:#fff4e0;color:#8a5a00}
+.ob-Optional{background:#eef3f7;color:#5a6a7a}
+select.rosterpick{min-width:150px}
+.chip.primary{background:var(--navy);color:#fff;font-size:10px;padding:1px 5px;border-radius:3px}
+td.nowrap{white-space:nowrap}
+td.nowrap a{text-decoration:none;font-size:15px;margin-right:4px}
+table.track td,table.track th{padding:3px 8px;font-size:12px}
+table.track tr.totals td{border-top:2px solid var(--navy);font-size:13px}
+.barcell{width:130px}
+.bar{display:inline-block;width:80px;height:8px;background:#e6e9ee;border-radius:4px;overflow:hidden;vertical-align:middle}
+.bar i{display:block;height:100%;background:#7EC8E3}
+.bar i.full{background:#2e9e5b}
+b.bad{color:#b00020}
+a.pkgbtn{float:right;font-size:12px;font-weight:normal;text-decoration:none;background:var(--navy);
+  color:#fff;padding:3px 10px;border-radius:4px}
+tr.gap td{background:#fff6f6}

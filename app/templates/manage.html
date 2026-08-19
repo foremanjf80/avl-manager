@@ -5,7 +5,9 @@
 {% for p in products %}<tr class="{{ 'inactive' if not p.active }}">
 <td>{{ p.name }}</td><td>{{ p.category }}</td>
 <td><form method="post" action="/products/{{ p.id }}/reps" class="inline">
-<input name="tech_reps" value="{{ p.tech_reps }}"><button>Save</button></form></td>
+<select name="person_ids" multiple size="3" class="rosterpick">
+{% for r in ce %}<option value="{{ r.id }}" {% if r.id in holders['product'].get(p.id, []) %}selected{% endif %}>{{ r.name }}</option>{% endfor %}
+</select><button>Save</button></form></td>
 <td><form method="post" action="/products/{{ p.id }}/lifecycle" class="inline">
 <select name="lifecycle"><option {% if p.lifecycle=='Roadmap' %}selected{% endif %}>Roadmap</option>
 <option {% if p.lifecycle=='Active' %}selected{% endif %}>Active</option>
@@ -17,8 +19,9 @@
 <h3>Add product</h3>
 <form method="post" action="/products/add" class="row">
 <input name="name" placeholder="Product name" required>
-<select name="category"><option>DC Module</option><option>AC Module</option><option>MLPE</option><option>ESS</option></select>
-<input name="tech_reps" placeholder="Prod/Tech reps">
+<select name="category">{% for cat in categories %}<option>{{ cat }}</option>{% endfor %}</select>
+<select name="person_ids" multiple size="3" class="rosterpick">
+{% for r in ce %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}</select>
 <select name="lifecycle"><option>Roadmap</option><option selected>Active</option></select>
 <input name="launch_status" placeholder="Released / target Q4-26">
 <button>Add</button></form></div>
@@ -28,17 +31,26 @@
 {% for a in avls %}<tr class="{{ 'inactive' if not a.active }}">
 <td>{{ a.name }}</td>
 <td colspan="2"><form method="post" action="/avls/{{ a.id }}/managers" class="inline">
-<input name="account_manager" value="{{ a.account_manager }}" placeholder="Account Manager">
-<input name="sr_commercial_rep" value="{{ a.sr_commercial_rep }}" placeholder="Sr. Commercial Rep">
+<select name="account_manager_id"><option value="">- vacant -</option>
+{% for r in sales %}<option value="{{ r.id }}" {% if r.id in holders['avl'].get(a.id, {}).get('am', []) %}selected{% endif %}>{{ r.name }}</option>{% endfor %}</select>
+<select name="sr_commercial_rep_id"><option value="">- vacant -</option>
+{% for r in sales %}<option value="{{ r.id }}" {% if r.id in holders['avl'].get(a.id, {}).get('scr', []) %}selected{% endif %}>{{ r.name }}</option>{% endfor %}</select>
 <button>Save</button></form></td>
 <td><form method="post" action="/avls/{{ a.id }}/toggle" class="inline"><button>{{ 'Remove' if a.active else 'Restore' }}</button></form></td>
 </tr>{% endfor %}</table>
 <h3>Add AVL</h3>
 <form method="post" action="/avls/add" class="row">
 <input name="name" placeholder="TPO / AVL name" required>
-<input name="account_manager" placeholder="Account Manager">
-<input name="sr_commercial_rep" placeholder="Sr. Commercial Rep">
+<select name="account_manager_id"><option value="">- Account Manager -</option>
+{% for r in sales %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}</select>
+<select name="sr_commercial_rep_id"><option value="">- Sr. Commercial Rep -</option>
+{% for r in sales %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}</select>
 <button>Add</button></form></div>
 </div>
-<p class="hint">Lifecycle: Roadmap = future launch (target date in the field), Active = on market, EOL = end of life (hidden from the matrix by default, history retained). Remove = soft delete for mistakes. Product/Technical reps ride the product; AM and Sr. Commercial Rep ride the AVL account, matching the trifecta model.</p>
+<p class="hint">People come from the roster on <a href="/team">Team</a> &mdash; add or retire someone there and
+they appear in (or drop out of) every picker here. Saving a seat writes a dated assignment, so
+<a href="/team">Team</a> keeps the full history of who covered what and when. Ctrl/Cmd-click to pick more than one
+Prod/Tech rep. Lifecycle: Roadmap = future launch (target date in the field), Active = on market,
+EOL = end of life (hidden from the matrix by default, history retained). Remove = soft delete for mistakes.</p>
+{% if not people %}<p class="hint" style="color:#b00">The roster is empty &mdash; add people on <a href="/team">Team</a> before assigning seats.</p>{% endif %}
 {% endblock %}

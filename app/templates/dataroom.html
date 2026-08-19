@@ -1,26 +1,100 @@
 {% extends "base.html" %}{% block body %}
 <h2>Dataroom / AVL Requirements Checklist</h2>
 <form method="get" action="/dataroom" class="row" style="margin-bottom:10px">
-<select name="product" onchange="this.form.submit()">{% for p in products %}<option value="{{ p.id }}" {% if p.id==sel_p %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+<select name="product" onchange="this.form.submit()">{% for p in products %}<option value="{{ p.id }}" {% if p.id==sel_p %}selected{% endif %}>{{ p.name }} &mdash; {{ p.category }}</option>{% endfor %}</select>
 <b>@</b>
 <select name="avl" onchange="this.form.submit()">{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel_a %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
+<select name="only" onchange="this.form.submit()">
+<option value="">All requirements</option>
+<option value="open" {% if only=='open' %}selected{% endif %}>Still open</option>
+{% for ob in obligations %}<option value="{{ ob }}" {% if only==ob %}selected{% endif %}>{{ ob }} only</option>{% endfor %}</select>
+{% if total_req %}<span class="sub2" style="align-self:center">Required complete: <b>{{ total_done }}/{{ total_req }}</b></span>{% endif %}
 </form>
-{% if not items %}
-<div class="card"><p class="hint">No checklist yet for this product x TPO.</p>
-<form method="post" action="/dataroom/seed">
+
+{% if request.query_params.get('err') == 'files' %}
+<p class="hint" style="color:#b00">That requirement still has files attached. Re-file them on the Files page first, then remove it.</p>
+{% endif %}
+
+{% if track %}
+<div class="card"><h3>Status tracker
+<a href="/dataroom/package?product={{ sel_p }}&amp;avl={{ sel_a }}" class="pkgbtn">Build submission package &rarr;</a></h3>
+<table class="list track"><tr><th>Document category</th><th>Required done</th><th></th>
+<th>In progress</th><th>Blocked</th><th>Not started</th><th>Files</th><th>Required w/o file</th></tr>
+{% for t in track %}<tr>
+<td><a href="#g{{ loop.index }}"><b>{{ t.name }}</b></a> <span class="sub2">{{ t.n }} reqs</span></td>
+<td>{% if t.req %}{{ t.done }}/{{ t.req }}{% else %}<span class="sub2">-</span>{% endif %}</td>
+<td class="barcell">{% if t.pct is not none %}<span class="bar"><i style="width:{{ t.pct }}%"
+  class="{{ 'full' if t.pct==100 else '' }}"></i></span> <span class="sub2">{{ t.pct }}%</span>{% endif %}</td>
+<td>{{ t.wip or '' }}</td>
+<td>{% if t.blocked %}<b class="bad">{{ t.blocked }}</b>{% endif %}</td>
+<td>{{ t.open or '' }}</td>
+<td class="sub2">{{ t.files }}</td>
+<td>{% if t.nofile_req %}<b class="bad">{{ t.nofile_req }}</b>{% endif %}</td>
+</tr>{% endfor %}
+<tr class="totals"><td><b>All categories</b></td>
+<td><b>{{ totals.done }}/{{ totals.req }}</b></td>
+<td class="barcell">{% if totals.pct is not none %}<span class="bar"><i style="width:{{ totals.pct }}%"
+  class="{{ 'full' if totals.pct==100 else '' }}"></i></span> <span class="sub2">{{ totals.pct }}%</span>{% endif %}</td>
+<td>{{ totals.wip or '' }}</td><td>{% if totals.blocked %}<b class="bad">{{ totals.blocked }}</b>{% endif %}</td>
+<td>{{ totals.open or '' }}</td><td class="sub2">{{ totals.files }}</td>
+<td>{% if totals.nofile_req %}<b class="bad">{{ totals.nofile_req }}</b>{% endif %}</td></tr>
+</table>
+<p class="hint">"Required w/o file" is what will show as a gap in a submission package. The tracker always
+covers the whole checklist, even when the list below is filtered.</p></div>
+{% endif %}
+
+<div class="card"><h3>Apply a workstream template</h3>
+{% if templates_ %}
+<form method="post" action="/dataroom/seed" class="row">
 <input type="hidden" name="product_id" value="{{ sel_p }}"><input type="hidden" name="avl_id" value="{{ sel_a }}">
-<button>Load standard workstreams (G4-ESS tracker template)</button></form></div>
+<select name="template_id">{% for t in templates_ %}<option value="{{ t.id }}">{{ t.name }} ({{ t.n_items }} items &mdash; {{ t.category or 'any product type' }}{% if t.avl_name %} / {{ t.avl_name }} only{% endif %})</option>{% endfor %}</select>
+<select name="mode"><option value="merge">Merge (add missing only)</option><option value="replace">Replace untouched rows</option></select>
+<button>Apply</button></form>
+<p class="hint">Templates scoped to <b>{{ category or 'any' }}</b> products, best match first. Manage them at <a href="/workstreams">Workstreams</a>.</p>
 {% else %}
-<table class="list"><tr><th>Workstream</th><th>Status</th><th>%</th><th>ETA</th><th>Owner</th><th>Notes</th><th></th></tr>
-{% for i in items %}<tr>
-<td><b>{{ i.workstream }}</b><div class="sub2">{{ i.updated_by }} {{ i.updated_at[:10] if i.updated_at }}</div></td>
+<p class="hint">No template covers <b>{{ category or 'this product type' }}</b> yet. Build one at <a href="/workstreams">Workstreams</a>.</p>
+{% endif %}
+</div>
+
+{% if groups %}
+{% for g in groups %}
+<h3 class="grp" id="g{{ loop.index }}">{{ g.name }}
+<span class="sub2">{{ g['items']|length }} requirement{{ '' if g['items']|length==1 else 's' }}</span></h3>
+<table class="list"><tr><th>Requirement</th><th></th><th>Status</th><th>%</th><th>ETA</th><th>Owner</th><th>Notes</th><th></th></tr>
+{% for i in g['items'] %}<tr>
+<td><b>{{ i.workstream }}</b>
+{% if i.description %}<div class="sub2">{{ i.description }}</div>{% endif %}
+<div class="sub2">{{ i.updated_by }} {{ i.updated_at[:10] if i.updated_at }}</div></td>
+<td><span class="ob ob-{{ i.obligation }}">{{ i.obligation[:4] }}</span></td>
 <form method="post" action="/dataroom/{{ i.id }}">
 <td><select name="status" class="cs-{{ i.status|replace(' ','') }}">{% for st in check_statuses %}<option {% if i.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select></td>
-<td><input name="pct" value="{{ i.pct }}" size="4"></td>
-<td><input name="eta" value="{{ i.eta }}" size="9"></td>
-<td><input name="owner" value="{{ i.owner }}" size="12"></td>
-<td><input name="notes" value="{{ i.notes }}" size="46"></td>
+<td><input name="pct" value="{{ i.pct }}" size="3"></td>
+<td><input name="eta" value="{{ i.eta }}" size="8"></td>
+<td><input name="owner" value="{{ i.owner }}" size="10"></td>
+<td><input name="notes" value="{{ i.notes }}" size="34"></td>
 <td><button>Save</button></td></form></tr>
+<tr class="attrow"><td colspan="6" class="sub2">
+{% for f in atts.get(i.id, []) %}<a href="/files/{{ f.id }}/download">{{ f.filename }}</a>{% if not loop.last %} &middot; {% endif %}{% else %}<span class="hint">no files</span>{% endfor %}
+</td>
+<td colspan="2"><form method="post" action="/files/upload" enctype="multipart/form-data" class="inline">
+<input type="hidden" name="kind" value="checklist"><input type="hidden" name="ref_id" value="{{ i.id }}">
+<input type="hidden" name="next_url" value="/dataroom?product={{ sel_p }}&amp;avl={{ sel_a }}{% if only %}&amp;only={{ only }}{% endif %}">
+<input type="file" name="f" required style="width:140px"><button>Attach</button></form>
+<form method="post" action="/dataroom/item/{{ i.id }}/delete" class="inline"
+      onsubmit="return confirm('Remove this requirement from this checklist?')"><button>&times;</button></form></td></tr>
 {% endfor %}</table>
+{% endfor %}
+{% else %}
+<p class="hint">{% if only %}Nothing matches that filter.{% else %}No checklist yet for this product &times; TPO. Apply a template above, or add a one-off requirement below.{% endif %}</p>
 {% endif %}
+
+<div class="card"><h3>Add a one-off requirement</h3>
+<form method="post" action="/dataroom/item/add" class="row">
+<input type="hidden" name="product_id" value="{{ sel_p }}"><input type="hidden" name="avl_id" value="{{ sel_a }}">
+<input name="doc_category" placeholder="Document category" size="22" list="dcats">
+<datalist id="dcats">{% for g in groups %}<option value="{{ g.name }}">{% endfor %}</datalist>
+<input name="workstream" placeholder="Required document / requirement" size="44" required>
+<select name="obligation">{% for ob in obligations %}<option>{{ ob }}</option>{% endfor %}</select>
+<button>Add</button></form>
+<p class="hint">Use this for something only this TPO asks for. If it applies broadly, add it to a template at <a href="/workstreams">Workstreams</a> instead.</p></div>
 {% endblock %}

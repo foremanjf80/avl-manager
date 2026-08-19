@@ -1,0 +1,68 @@
+{% extends "base.html" %}{% block body %}
+<h2>Dataroom Submission Package</h2>
+<p class="hint">Zips every file attached to this product &times; TPO checklist, foldered by document
+category, with a MANIFEST.csv and a readable CONTENTS.txt that also names every gap.
+Back to the <a href="/dataroom?product={{ sel_p }}&amp;avl={{ sel_a }}">checklist</a>.</p>
+
+{% if request.query_params.get('err') == 'gone' %}
+<p class="hint" style="color:#b00">That package file is no longer on disk. Rebuild it below.</p>{% endif %}
+
+<form method="get" action="/dataroom/package" class="row" style="margin-bottom:10px">
+<select name="product" onchange="this.form.submit()">{% for p in products %}<option value="{{ p.id }}" {% if p.id==sel_p %}selected{% endif %}>{{ p.name }} &mdash; {{ p.category }}</option>{% endfor %}</select>
+<b>@</b>
+<select name="avl" onchange="this.form.submit()">{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel_a %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
+<select name="scope" onchange="this.form.submit()">{% for k, lbl in scopes.items() %}<option value="{{ k }}" {% if scope==k %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select>
+</form>
+
+<div class="card"><h3>What will be sent</h3>
+<p><b>{{ stats.n_files }}</b> file{{ '' if stats.n_files==1 else 's' }} across
+<b>{{ stats.n_reqs }}</b> requirement{{ '' if stats.n_reqs==1 else 's' }} in scope.
+{% if stats.n_gaps %}<b class="bad">{{ stats.n_gaps }}</b> have no file attached{% if stats.blocking %},
+of which <b class="bad">{{ stats.blocking }}</b> are Required{% endif %}.{% else %}Nothing is missing.{% endif %}</p>
+{% if stats.blocking %}
+<p class="hint" style="color:#b00">Required requirements with no file are listed in the manifest as MISSING.
+You can still build the package &mdash; a TPO usually wants the partial set plus a clear list of what is coming.</p>
+{% endif %}
+<form method="post" action="/dataroom/package/build" class="row">
+<input type="hidden" name="product_id" value="{{ sel_p }}">
+<input type="hidden" name="avl_id" value="{{ sel_a }}">
+<input type="hidden" name="scope" value="{{ scope }}">
+<input name="label" placeholder="Label, e.g. 'Interim IE submission'" size="34">
+<button {% if not stats.n_files %}disabled title="Nothing to zip yet"{% endif %}>Build &amp; download ZIP</button>
+</form>
+{% if not stats.n_files %}<p class="hint">No files are attached to this checklist yet &mdash; attach them on the
+<a href="/dataroom?product={{ sel_p }}&amp;avl={{ sel_a }}">Dataroom</a> page or via <a href="/files">Files</a>.</p>{% endif %}
+</div>
+
+{% for g in groups %}
+<h3 class="grp">{{ g.name }}
+<span class="sub2">{{ g['items']|selectattr('files')|list|length }}/{{ g['items']|length }} with files</span></h3>
+<table class="list"><tr><th>Required document</th><th></th><th>Status</th><th>Files in package</th></tr>
+{% for i in g['items'] %}<tr class="{{ 'gap' if i.gap and i.row.obligation=='Required' }}">
+<td>{{ i.row.workstream }}</td>
+<td><span class="ob ob-{{ i.row.obligation }}">{{ i.row.obligation[:4] }}</span></td>
+<td class="sub2">{{ i.row.status }}</td>
+<td>{% for f in i.files %}<a href="/files/{{ f.id }}/download">{{ f.filename }}</a>{% if not loop.last %}<br>{% endif %}
+{% else %}<span class="{{ 'bad' if i.row.obligation=='Required' else 'hint' }}">MISSING</span>{% endfor %}</td>
+</tr>{% endfor %}</table>
+{% else %}
+<p class="hint">No requirements in scope. Seed a checklist on the <a href="/dataroom">Dataroom</a> page first.</p>
+{% endfor %}
+
+{% if prior %}
+<div class="card"><h3>Packages already built</h3>
+<table class="list"><tr><th>Built</th><th>By</th><th>Label</th><th>Scope</th><th>Files</th><th>Gaps</th><th>Size</th><th></th><th></th></tr>
+{% for p in prior %}<tr>
+<td class="sub2">{{ p.created_at[:16] }}</td><td class="sub2">{{ p.created_by }}</td>
+<td>{{ p.label }}</td><td class="sub2">{{ scopes.get(p.scope, p.scope) }}</td>
+<td>{{ p.n_files }}</td><td>{% if p.n_gaps %}<b class="bad">{{ p.n_gaps }}</b>{% else %}0{% endif %}</td>
+<td class="sub2">{{ (p.bytes / 1024)|round|int }} KB</td>
+<td><a href="/dataroom/package/{{ p.id }}/download">ZIP</a> &middot;
+    <a href="/dataroom/package/{{ p.id }}/manifest.csv">manifest</a></td>
+<td><form method="post" action="/dataroom/package/{{ p.id }}/delete" class="inline"
+      onsubmit="return confirm('Delete this built package? The checklist and its files are untouched.')"><button>&times;</button></form></td>
+</tr>{% endfor %}</table>
+<p class="hint">The manifest is a snapshot of what actually went out, so it stays accurate even after the
+checklist moves on.</p></div>
+{% endif %}
+{% endblock %}

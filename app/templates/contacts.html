@@ -1,0 +1,64 @@
+{% extends "base.html" %}{% block body %}
+<h2>AVL Contacts</h2>
+<p class="hint">The people on the TPO side &mdash; who we call, email and chase. Separate from the Qcells
+roster on <a href="/team">Team</a>, which is who covers the account from our side.</p>
+
+<form method="get" action="/contacts" class="row" style="margin-bottom:10px">
+<select name="avl" onchange="this.form.submit()">
+<option value="0">All TPO AVLs</option>
+{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel_a %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
+<input name="q" value="{{ q }}" placeholder="Search name / role / email" size="26">
+<label class="sub2" style="align-self:center"><input type="checkbox" name="show_inactive" value="1"
+  {% if show_inactive %}checked{% endif %} onchange="this.form.submit()"> show former contacts</label>
+<button>Search</button>
+<a href="/contacts.csv" class="sub2" style="align-self:center">Export CSV</a>
+<span class="sub2" style="align-self:center">{{ n_live }} contact{{ '' if n_live==1 else 's' }}</span>
+</form>
+
+{% for g in groups %}
+<div class="card">
+<h3>{{ g.avl.name }}
+{% if g.avl.account_manager %}<span class="sub2">our AM: {{ g.avl.account_manager }}</span>{% endif %}</h3>
+
+{% if g['rows'] %}
+<table class="list"><tr><th></th><th>Name</th><th>Role / title</th><th>Email</th><th>Phone</th><th>Website</th><th>Notes</th><th></th><th></th></tr>
+{% for ct in g['rows'] %}<tr class="{{ 'inactive' if not ct.active }}">
+<td>{% if ct.is_primary %}<span class="chip primary" title="Primary point of contact">POC</span>{% endif %}</td>
+<form method="post" action="/contacts/{{ ct.id }}/save">
+<td><input name="name" value="{{ ct.name }}" size="18" required></td>
+<td><input name="role" value="{{ ct.role }}" size="20" list="croles"></td>
+<td><input name="email" value="{{ ct.email }}" size="24" type="email"></td>
+<td><input name="phone" value="{{ ct.phone }}" size="14"></td>
+<td><input name="website" value="{{ ct.website }}" size="20" placeholder="example.com"></td>
+<td><input name="notes" value="{{ ct.notes }}" size="24"></td>
+<td><button>Save</button></td></form>
+<td class="nowrap">
+{% if ct.email %}<a href="mailto:{{ ct.email }}" title="Email">&#9993;</a>{% endif %}
+{% if ct.website %}<a href="{{ ct.website }}" target="_blank" rel="noopener" title="Open site">&#8599;</a>{% endif %}
+<form method="post" action="/contacts/{{ ct.id }}/primary" class="inline"><button title="Set / clear primary point of contact">{{ '&#9733;'|safe if ct.is_primary else '&#9734;'|safe }}</button></form>
+<form method="post" action="/contacts/{{ ct.id }}/toggle" class="inline"><button>{{ 'Remove' if ct.active else 'Restore' }}</button></form>
+</td></tr>
+{% endfor %}</table>
+{% else %}
+<p class="hint">No contacts recorded for {{ g.avl.name }} yet.</p>
+{% endif %}
+
+<form method="post" action="/contacts/add" class="row" style="margin-top:8px">
+<input type="hidden" name="avl_id" value="{{ g.avl.id }}">
+<input name="name" placeholder="Full name" size="18" required>
+<input name="role" placeholder="Role / title" size="20" list="croles">
+<input name="email" placeholder="email@tpo.com" size="24" type="email">
+<input name="phone" placeholder="Phone" size="14">
+<input name="website" placeholder="example.com" size="20">
+<input name="notes" placeholder="Notes" size="20">
+<label class="sub2" style="align-self:center"><input type="checkbox" name="is_primary" value="1"> primary</label>
+<button>Add contact</button></form>
+</div>
+{% else %}
+<p class="hint">No active TPO AVLs. Add one on <a href="/manage">Manage</a> first.</p>
+{% endfor %}
+
+<datalist id="croles">{% for r in contact_roles %}<option value="{{ r }}">{% endfor %}</datalist>
+<p class="hint">The star marks the primary point of contact &mdash; one per AVL. Remove is a soft delete, so
+someone who leaves the TPO stops appearing in the list but stays readable in history via "show former contacts".</p>
+{% endblock %}
