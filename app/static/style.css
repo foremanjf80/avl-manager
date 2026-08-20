@@ -65,3 +65,27 @@ b.bad{color:#b00020}
 a.pkgbtn{float:right;font-size:12px;font-weight:normal;text-decoration:none;background:var(--navy);
   color:#fff;padding:3px 10px;border-radius:4px}
 tr.gap td{background:#fff6f6}
+.callform .fgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.callform .fgrid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.callform label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#555}
+.callform label.full{margin-top:10px}
+.callform select[multiple]{min-height:96px}
+.callform textarea{font:inherit;padding:6px;border:1px solid #ccc;border-radius:4px;resize:vertical;width:100%}
+.callform textarea:focus,.callform input:focus,.callform select:focus{outline:2px solid #7EC8E3;outline-offset:-1px}
+.callform .row{margin-top:10px}
+@media(max-width:900px){.callform .fgrid{grid-template-columns:1fr 1fr}.callform .fgrid2{grid-template-columns:1fr}}
+table.calls td.wrap{white-space:pre-wrap;max-width:280px;vertical-align:top;font-size:12px}
+table.calls td{vertical-align:top}
+td.atts{font-size:11px;max-width:180px}
+td.atts .side{display:inline-block;min-width:38px;font-size:9px;padding:0 4px;border-radius:3px;
+  background:#e8eef5;color:var(--navy);margin-right:3px}
+td.atts .side.tpo{background:#f2e8f5;color:#6a3b7a}
+td.editcell{background:#f7f9fc;padding:12px}
+.actform .fgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px}
+.actform label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#555}
+.actform textarea{font:inherit;padding:6px;border:1px solid #ccc;border-radius:4px;resize:vertical;width:100%}
+.actform .row{margin-top:10px}
+@media(max-width:900px){.actform .fgrid{grid-template-columns:1fr}}
+.chip.overdue{background:#b00020;color:#fff;font-size:11px;padding:1px 7px;border-radius:3px;vertical-align:middle}
+form.picker{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+form.picker select{max-width:260px}

@@ -1,30 +1,103 @@
 {% extends "base.html" %}{% block body %}
-<div class="row" style="justify-content:space-between"><h2>Interaction Log</h2><a class="btn small" href="/export/calls.csv">CSV</a></div>
-<div class="card"><h3>Log a call</h3>
-<form method="post" action="/calls/add" class="row">
-<select name="avl_id" required>{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
-<input name="call_date" type="date" required>
-<select name="call_type"><option>Joint</option><option>Technical</option><option>Commercial</option><option>Intro</option><option>QBR</option></select>
-<input name="qcells_attendees" placeholder="Qcells attendees (AM, Sr. Comm, Prod/Tech)" size="34">
-<input name="tpo_attendees" placeholder="TPO attendees" size="22">
+<div class="row" style="justify-content:space-between"><h2>Interaction Log</h2>
+<a class="btn small" href="/export/calls.csv">CSV</a></div>
+
+{% macro callform(action, r, pk, submit) %}
+<form method="post" action="{{ action }}" class="callform">
+<div class="fgrid">
+  <label>TPO AVL
+    <select name="avl_id" class="avlpick" required>{% for a in avls %}<option value="{{ a.id }}"
+      {% if (r and a.id==r.avl_id) or (not r and a.id==sel) %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select></label>
+  <label>Date
+    <input name="call_date" type="date" value="{{ r.call_date if r else today }}" required></label>
+  <label>Type
+    <select name="call_type">{% for t in call_types %}<option {% if r and r.call_type==t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+  <label>Owner / due
+    <input name="owner_due" value="{{ r.owner_due if r else '' }}" placeholder="e.g. JF - 15 Sep"></label>
+</div>
+
+<div class="fgrid2">
+  <label>Qcells attendees
+    <select name="qcells_person_ids" multiple size="5">{% for p in people %}<option value="{{ p.id }}"
+      {% if pk and p.id in pk.qcells %}selected{% endif %}>{{ p.name }}{% if p.org %} - {{ p.org }}{% endif %}</option>{% endfor %}</select>
+    <input name="qcells_other" value="{{ pk.other_q|join(', ') if pk else '' }}" placeholder="Other / guests (comma separated)"></label>
+  <label>TPO attendees
+    <select name="tpo_contact_ids" class="tpopick" multiple size="5"></select>
+    <input name="tpo_other" value="{{ pk.other_t|join(', ') if pk else '' }}" placeholder="Other / guests (comma separated)">
+    <span class="sub2">From the AVL's <a href="/contacts">contact list</a>.</span></label>
+</div>
+
+<label class="full">Topics covered
+  <textarea name="topics" rows="5" placeholder="What was discussed. One point per line works well.">{{ r.topics if r else '' }}</textarea></label>
+<label class="full">Outcomes / next steps
+  <textarea name="outcomes" rows="5" placeholder="Decisions, commitments, who owes what.">{{ r.outcomes if r else '' }}</textarea></label>
+
+<div class="row"><button>{{ submit }}</button>
+{% if r %}<a href="/calls?avl={{ sel }}" class="sub2" style="align-self:center">Cancel</a>{% endif %}</div>
+<script type="application/json" class="preselect">{{ (pk.tpo if pk else [])|tojson }}</script>
 </form>
-<form method="post" action="/calls/add" class="row" id="row2"></form>
-<script>
-// merge second row inputs into the same form
-const f=document.querySelector('form[action="/calls/add"]');
-['topics','outcomes','owner_due'].forEach((n,i)=>{
- const inp=document.createElement('input');inp.name=n;inp.size=n=='owner_due'?18:44;
- inp.placeholder=['Topics covered','Outcomes / next steps','Owner / due'][i];f.appendChild(inp);});
-const b=document.createElement('button');b.textContent='Log call';f.appendChild(b);
-</script></div>
-<div class="row" style="margin:8px 0">
-<form method="get" action="/calls">Filter:
+{% endmacro %}
+
+<div class="card"><h3>Log a call</h3>
+{{ callform('/calls/add', None, None, 'Log call') }}</div>
+
+<form method="get" action="/calls" class="row" style="margin:8px 0">
 <select name="avl" onchange="this.form.submit()"><option value="0">All TPOs</option>
-{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
-</select></form></div>
-<table class="list"><tr><th>Date</th><th>TPO</th><th>Type</th><th>Qcells attendees</th><th>TPO attendees</th><th>Topics</th><th>Outcomes / next steps</th><th>Owner / due</th><th>Logged by</th></tr>
-{% for r in rows %}<tr><td>{{ r.call_date }}</td><td><b>{{ r.avl_name }}</b></td><td>{{ r.call_type }}</td>
-<td>{{ r.qcells_attendees }}</td><td>{{ r.tpo_attendees }}</td><td>{{ r.topics }}</td>
-<td>{{ r.outcomes }}</td><td>{{ r.owner_due }}</td><td class="sub2">{{ r.created_by }}</td></tr>
-{% else %}<tr><td colspan="9" class="hint">No calls logged yet.</td></tr>{% endfor %}</table>
+{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
+<input name="q" value="{{ q }}" placeholder="Search topics / outcomes / attendees" size="30">
+<button>Search</button>
+<span class="sub2" style="align-self:center">{{ rows|length }} call{{ '' if rows|length==1 else 's' }}</span>
+</form>
+
+<table class="list calls"><tr><th>Date</th><th>TPO</th><th>Type</th><th>Attendees</th>
+<th>Topics</th><th>Outcomes / next steps</th><th>Owner / due</th><th></th></tr>
+{% for r in rows %}
+<tr>
+<td class="nowrap">{{ r.call_date }}<div class="sub2">{{ r.created_by }}</div></td>
+<td><b>{{ r.avl_name }}</b></td><td class="sub2">{{ r.call_type }}</td>
+<td class="atts"><div><span class="side">Qcells</span> {{ r.qcells_attendees or '-' }}</div>
+    <div><span class="side tpo">TPO</span> {{ r.tpo_attendees or '-' }}</div></td>
+<td class="wrap">{{ r.topics }}</td>
+<td class="wrap">{{ r.outcomes }}</td>
+<td class="sub2">{{ r.owner_due }}</td>
+<td class="nowrap"><a href="/calls?avl={{ sel }}&amp;q={{ q }}&amp;edit={{ r.id }}#e{{ r.id }}">Edit</a>
+<form method="post" action="/calls/{{ r.id }}/delete" class="inline"
+      onsubmit="return confirm('Delete this call log entry? This cannot be undone.')"><button>&times;</button></form></td>
+</tr>
+{% if edit == r.id %}
+<tr id="e{{ r.id }}"><td colspan="8" class="editcell">
+<div class="card" style="margin:0"><h3>Edit call &mdash; {{ r.avl_name }} {{ r.call_date }}</h3>
+{{ callform('/calls/' ~ r.id ~ '/save', r, picked[r.id], 'Save changes') }}</div></td></tr>
+{% endif %}
+{% else %}<tr><td colspan="8" class="hint">No calls logged{% if q %} matching "{{ q }}"{% endif %} yet.</td></tr>{% endfor %}
+</table>
+
+<script>
+const CONTACTS = {{ contacts_by_avl|tojson }};
+// Each form's TPO picker follows its own AVL select.
+document.querySelectorAll('form.callform').forEach(f => {
+  const avlSel = f.querySelector('.avlpick'), tpoSel = f.querySelector('.tpopick');
+  const pre = JSON.parse(f.querySelector('.preselect').textContent || '[]');
+  function fill(keepPre) {
+    const chosen = keepPre ? pre : Array.from(tpoSel.selectedOptions).map(o => +o.value);
+    tpoSel.innerHTML = '';
+    const list = CONTACTS[avlSel.value] || [];
+    list.forEach(ct => {
+      const o = document.createElement('option');
+      o.value = ct.id;
+      o.textContent = ct.name + (ct.role ? ' - ' + ct.role : '');
+      if (chosen.includes(ct.id)) o.selected = true;
+      tpoSel.appendChild(o);
+    });
+    if (!list.length) {
+      const o = document.createElement('option');
+      o.disabled = true;
+      o.textContent = 'No contacts for this AVL yet';
+      tpoSel.appendChild(o);
+    }
+  }
+  avlSel.addEventListener('change', () => fill(false));
+  fill(true);
+});
+</script>
 {% endblock %}

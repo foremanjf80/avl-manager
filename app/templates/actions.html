@@ -1,18 +1,110 @@
 {% extends "base.html" %}{% block body %}
-<h2>Action Items</h2>
-<div class="card"><h3>Add action</h3>
-<form method="post" action="/actions/add" class="row">
-<input name="description" placeholder="What needs to happen" size="40" required>
-<select name="avl_id"><option value="">- TPO (optional) -</option>{% for a in avls %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select>
-<input name="owner" placeholder="Owner">
-<input name="due_date" type="date">
-<button>Add</button></form></div>
-<p><a href="/actions?show=open" class="{{ 'hint' if show=='all' }}">Open</a> | <a href="/actions?show=all" class="{{ 'hint' if show=='open' }}">All</a></p>
-<table class="list"><tr><th>Due</th><th>Action</th><th>TPO</th><th>Owner</th><th>Status</th><th>By</th><th></th></tr>
+<h2>Action Items {% if n_overdue %}<span class="chip overdue">{{ n_overdue }} overdue</span>{% endif %}</h2>
+
+{% macro actionform(action, r, submit) %}
+<form method="post" action="{{ action }}" class="actform">
+<label class="full">What needs to happen
+  <textarea name="description" rows="2" required
+    placeholder="e.g. Send the UL 9540A Ed.6 cell-level report to EnFin">{{ r.description if r else '' }}</textarea></label>
+<div class="fgrid">
+  <label>Owner
+    <select name="owner_person_id" class="ownerpick">
+      <option value="">- unassigned -</option>
+      {% for p in people %}<option value="{{ p.id }}" {% if r and r.owner_person_id==p.id %}selected{% endif %}>{{ p.name }}{% if p.org %} - {{ p.org }}{% endif %}</option>{% endfor %}
+    </select>
+    <input name="owner_other" value="{{ r.owner if r and not r.owner_person_id else '' }}"
+           placeholder="or someone not on the roster"></label>
+  <label>Due
+    <input name="due_date" type="date" value="{{ r.due_date if r else '' }}"></label>
+  <label>Priority
+    <select name="priority">{% for p in priorities %}<option {% if (r and r.priority==p) or (not r and p=='Normal') %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></label>
+</div>
+<div class="fgrid">
+  <label>TPO AVL
+    <select name="avl_id" class="avlpick"><option value="">- none -</option>
+      {% for a in avls %}<option value="{{ a.id }}" {% if (r and r.avl_id==a.id) or (not r and a.id==sel_a) %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select></label>
+  <label>Product
+    <select name="product_id" class="prodpick"><option value="">- none -</option></select></label>
+  <label>Workstream requirement
+    <select name="checklist_item_id" class="reqpick"><option value="">- none -</option></select>
+    <span class="sub2">Optional. Picking one sets the TPO and product from the checklist.</span></label>
+</div>
+<div class="row"><button>{{ submit }}</button>
+{% if r %}<a href="/actions?show={{ show }}&amp;avl={{ sel_a }}" class="sub2" style="align-self:center">Cancel</a>{% endif %}</div>
+<script type="application/json" class="presel">{{ {'avl': (r.avl_id if r else sel_a) or '', 'product': (r.product_id if r else '') or '', 'req': (r.checklist_item_id if r else '') or ''}|tojson }}</script>
+</form>
+{% endmacro %}
+
+<div class="card"><h3>Add action</h3>{{ actionform('/actions/add', None, 'Add') }}</div>
+
+<form method="get" action="/actions" class="row" style="margin:8px 0">
+<select name="show" onchange="this.form.submit()">
+<option value="open" {% if show=='open' %}selected{% endif %}>Open only</option>
+<option value="all" {% if show=='all' %}selected{% endif %}>All</option></select>
+<select name="avl" onchange="this.form.submit()"><option value="0">All TPOs</option>
+{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel_a %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
+<select name="owner" onchange="this.form.submit()"><option value="0">Any owner</option>
+{% for p in people %}<option value="{{ p.id }}" {% if p.id==sel_o %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+<span class="sub2" style="align-self:center">{{ rows|length }} item{{ '' if rows|length==1 else 's' }}</span>
+</form>
+
+<table class="list"><tr><th>Due</th><th></th><th>Action</th><th>Owner</th><th>TPO / requirement</th><th>Status</th><th>By</th><th></th></tr>
 {% for r in rows %}<tr class="{{ 'overdue' if r.status=='Open' and r.due_date and r.due_date < today }}">
-<td>{{ r.due_date or '-' }}</td><td>{{ r.description }}</td><td>{{ r.avl_name or '-' }}</td>
-<td>{{ r.owner }}</td><td>{{ r.status }}</td><td class="sub2">{{ r.created_by }}</td>
-<td>{% if r.status=='Open' %}<form method="post" action="/actions/{{ r.id }}/done" class="inline"><button>Done</button></form>{% else %}<span class="sub2">{{ r.closed_at[:10] if r.closed_at }}</span>{% endif %}</td></tr>
-{% else %}<tr><td colspan="7" class="hint">Nothing here.</td></tr>{% endfor %}</table>
-<p class="hint">Red rows are overdue. Actions can also be added from a logged call's follow-ups.</p>
+<td class="nowrap">{{ r.due_date or '-' }}</td>
+<td>{% if r.priority and r.priority != 'Normal' %}<span class="ob ob-{{ 'Required' if r.priority=='High' else 'Optional' }}">{{ r.priority }}</span>{% endif %}</td>
+<td class="wrap">{{ r.description }}</td>
+<td>{{ r.owner_name or r.owner or '-' }}</td>
+<td class="sub2">{% if r.avl_name %}<b>{{ r.avl_name }}</b>{% endif %}
+{% if r.workstream %}<div>{{ r.product_name }} &mdash; {% if r.doc_category %}{{ r.doc_category }}: {% endif %}{{ r.workstream }}
+<a href="/dataroom?product={{ r.product_id }}&amp;avl={{ r.avl_id }}" title="Open on the checklist">&#8599;</a>
+<span class="sub2">[{{ r.req_status }}]</span></div>{% endif %}</td>
+<td>{{ r.status }}</td><td class="sub2">{{ r.created_by }}</td>
+<td class="nowrap">
+{% if r.status=='Open' %}<form method="post" action="/actions/{{ r.id }}/done" class="inline"><button>Done</button></form>
+{% else %}<form method="post" action="/actions/{{ r.id }}/reopen" class="inline"><button>Reopen</button></form>{% endif %}
+<a href="/actions?show={{ show }}&amp;avl={{ sel_a }}&amp;edit={{ r.id }}#e{{ r.id }}">Edit</a>
+<form method="post" action="/actions/{{ r.id }}/delete" class="inline"
+      onsubmit="return confirm('Delete this action item?')"><button>&times;</button></form></td></tr>
+{% if edit == r.id %}
+<tr id="e{{ r.id }}"><td colspan="8" class="editcell">
+<div class="card" style="margin:0"><h3>Edit action</h3>{{ actionform('/actions/' ~ r.id ~ '/save', r, 'Save changes') }}</div></td></tr>
+{% endif %}
+{% else %}<tr><td colspan="8" class="hint">Nothing here.</td></tr>{% endfor %}</table>
+
+<p class="hint">Red rows are overdue. Linking an action to a workstream requirement records what the
+action actually unblocks &mdash; the arrow jumps to that row on the <a href="/dataroom">Dataroom</a> checklist.</p>
+
+<script>
+const REQS = {{ tree|tojson }};
+document.querySelectorAll('form.actform').forEach(f => {
+  const avlSel=f.querySelector('.avlpick'), prodSel=f.querySelector('.prodpick'),
+        reqSel=f.querySelector('.reqpick');
+  const pre=JSON.parse(f.querySelector('.presel').textContent||'{}');
+  function opt(v,t){const o=document.createElement('option');o.value=v;o.textContent=t;return o;}
+  function fillProd(keep){
+    const want = keep ? String(pre.product||'') : '';
+    prodSel.innerHTML=''; prodSel.appendChild(opt('','- none -'));
+    const byProd = REQS[avlSel.value] || {};
+    Object.keys(byProd).forEach(pid => {
+      const o = opt(pid, byProd[pid].name);
+      if (pid === want) o.selected = true;
+      prodSel.appendChild(o);
+    });
+    fillReq(keep);
+  }
+  function fillReq(keep){
+    const want = keep ? String(pre.req||'') : '';
+    reqSel.innerHTML=''; reqSel.appendChild(opt('','- none -'));
+    const entry = (REQS[avlSel.value]||{})[prodSel.value];
+    (entry ? entry.items : []).forEach(it => {
+      const o = opt(it.id, (it.cat ? it.cat + ': ' : '') + it.ws + ' [' + it.status + ']');
+      if (String(it.id) === want) o.selected = true;
+      reqSel.appendChild(o);
+    });
+  }
+  avlSel.addEventListener('change', () => fillProd(false));
+  prodSel.addEventListener('change', () => fillReq(false));
+  fillProd(true);
+});
+</script>
 {% endblock %}

@@ -128,12 +128,23 @@ def manage(request: Request, user=Depends(require_user)):
         "product": {p["id"]: [r["person_id"] for r in db.role_holders(c, PT, product_id=p["id"])]
                     for p in products},
     }
-    sales = [p for p in people if p["org"] != "Products / CE"]
-    ce = [p for p in people if p["org"] != "Sales"]
+    AM_, SCR_, PT_ = db.ROLES
+    # Options are built per row so somebody already holding a seat stays listed
+    # even if their team would not normally be offered for it.
+    prod_opts = {p["id"]: db.role_options(people, PT_, holders["product"].get(p["id"], []))
+                 for p in products}
+    avl_opts = {a["id"]: {
+        "am": db.role_options(people, AM_, holders["avl"].get(a["id"], {}).get("am", [])),
+        "scr": db.role_options(people, SCR_, holders["avl"].get(a["id"], {}).get("scr", [])),
+    } for a in avls}
+    new_prod_opts = db.role_options(people, PT_)
+    new_avl_opts = db.role_options(people, AM_)
     c.close()
     return templates.TemplateResponse(request, "manage.html", {"user": user,
                             "avls": avls, "products": products, "categories": db.CATEGORIES,
-                            "people": people, "sales": sales, "ce": ce, "holders": holders})
+                            "people": people, "holders": holders,
+                            "prod_opts": prod_opts, "avl_opts": avl_opts,
+                            "new_prod_opts": new_prod_opts, "new_avl_opts": new_avl_opts})
 
 @app.post("/products/add")
 def add_product(request: Request, name: str = Form(...), category: str = Form(...),
@@ -232,30 +243,102 @@ def audit(request: Request, user=Depends(require_user)):
 
 # ---------------- interaction log ----------------
 @app.get("/calls", response_class=HTMLResponse)
-def calls(request: Request, avl: int = 0, user=Depends(require_user)):
+def calls(request: Request, avl: int = 0, q: str = "", edit: int = 0,
+          user=Depends(require_user)):
     c = db.conn()
     avls = c.execute("SELECT * FROM avls WHERE active=1 ORDER BY name").fetchall()
-    q = ("SELECT calls.*, avls.name AS avl_name FROM calls JOIN avls ON avls.id=calls.avl_id ")
-    rows = (c.execute(q + "WHERE avl_id=? ORDER BY call_date DESC, calls.id DESC", (avl,)).fetchall()
-            if avl else c.execute(q + "ORDER BY call_date DESC, calls.id DESC LIMIT 200").fetchall())
+    people = c.execute("SELECT id, name, org FROM people WHERE active=1 ORDER BY name").fetchall()
+    sql = "SELECT calls.*, avls.name AS avl_name FROM calls JOIN avls ON avls.id=calls.avl_id WHERE 1=1 "
+    params = []
+    if avl:
+        sql += "AND avl_id=? "
+        params.append(avl)
+    if q.strip():
+        sql += ("AND (topics LIKE ? OR outcomes LIKE ? OR owner_due LIKE ? "
+                "OR qcells_attendees LIKE ? OR tpo_attendees LIKE ?) ")
+        params += [f"%{q.strip()}%"] * 5
+    rows = c.execute(sql + "ORDER BY call_date DESC, calls.id DESC LIMIT 300", params).fetchall()
+    # What each logged call already has selected, so the edit form comes up filled in.
+    picked = {r["id"]: {"qcells": [], "tpo": [], "other_q": [], "other_t": []} for r in rows}
+    if rows:
+        qs = ",".join("?" * len(rows))
+        for at in c.execute(f"SELECT * FROM call_attendees WHERE call_id IN ({qs})",
+                            [r["id"] for r in rows]):
+            pk = picked[at["call_id"]]
+            if at["person_id"]:
+                pk["qcells"].append(at["person_id"])
+            elif at["contact_id"]:
+                pk["tpo"].append(at["contact_id"])
+            else:
+                pk["other_q" if at["side"] == "qcells" else "other_t"].append(at["name"])
+    # avl -> its active contacts, driving the TPO attendee picker
+    by_avl = {}
+    for ct in c.execute("SELECT id, avl_id, name, role FROM contacts WHERE active=1 ORDER BY name"):
+        by_avl.setdefault(str(ct["avl_id"]), []).append(
+            {"id": ct["id"], "name": ct["name"], "role": ct["role"]})
     c.close()
     return templates.TemplateResponse(request, "calls.html", {"user": user, "avls": avls,
-                                                              "rows": rows, "sel": avl})
+        "rows": rows, "sel": avl, "q": q, "people": people, "contacts_by_avl": by_avl,
+        "picked": picked, "call_types": db.CALL_TYPES, "edit": edit,
+        "today": datetime.date.today().isoformat()})
+
+def _save_attendees(c, cid, qcells_person_ids, tpo_contact_ids, qcells_other, tpo_other):
+    db.set_call_attendees(c, cid, "qcells", person_ids=qcells_person_ids, other=qcells_other)
+    db.set_call_attendees(c, cid, "tpo", contact_ids=tpo_contact_ids, other=tpo_other)
 
 @app.post("/calls/add")
 def add_call(request: Request, avl_id: int = Form(...), call_date: str = Form(...),
-             call_type: str = Form("Joint"), qcells_attendees: str = Form(""),
-             tpo_attendees: str = Form(""), topics: str = Form(""), outcomes: str = Form(""),
+             call_type: str = Form("Joint"),
+             qcells_person_ids: list[int] = Form(default=[]),
+             tpo_contact_ids: list[int] = Form(default=[]),
+             qcells_other: str = Form(""), tpo_other: str = Form(""),
+             topics: str = Form(""), outcomes: str = Form(""),
              owner_due: str = Form(""), user=Depends(require_editor)):
     c = db.conn()
-    c.execute("INSERT INTO calls(avl_id, call_date, call_type, qcells_attendees, tpo_attendees, "
-              "topics, outcomes, owner_due, created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-              (avl_id, call_date, call_type, qcells_attendees.strip(), tpo_attendees.strip(),
-               topics.strip(), outcomes.strip(), owner_due.strip(), user["email"], now()))
+    c.execute("INSERT INTO calls(avl_id, call_date, call_type, topics, outcomes, owner_due, "
+              "created_by, created_at) VALUES(?,?,?,?,?,?,?,?)",
+              (avl_id, call_date, call_type, topics.strip(), outcomes.strip(),
+               owner_due.strip(), user["email"], now()))
+    cid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+    _save_attendees(c, cid, qcells_person_ids, tpo_contact_ids, qcells_other, tpo_other)
     aname = c.execute("SELECT name FROM avls WHERE id=?", (avl_id,)).fetchone()["name"]
     c.commit(); c.close()
     db.log(user["email"], "call:add", f"{aname} {call_date} ({call_type})")
     return RedirectResponse(f"/calls?avl={avl_id}", status_code=303)
+
+@app.post("/calls/{cid}/save")
+def save_call(cid: int, request: Request, avl_id: int = Form(...), call_date: str = Form(...),
+              call_type: str = Form("Joint"),
+              qcells_person_ids: list[int] = Form(default=[]),
+              tpo_contact_ids: list[int] = Form(default=[]),
+              qcells_other: str = Form(""), tpo_other: str = Form(""),
+              topics: str = Form(""), outcomes: str = Form(""),
+              owner_due: str = Form(""), user=Depends(require_editor)):
+    c = db.conn()
+    if not c.execute("SELECT 1 FROM calls WHERE id=?", (cid,)).fetchone():
+        c.close()
+        return RedirectResponse("/calls", status_code=303)
+    c.execute("UPDATE calls SET avl_id=?, call_date=?, call_type=?, topics=?, outcomes=?, "
+              "owner_due=? WHERE id=?", (avl_id, call_date, call_type, topics.strip(),
+                                         outcomes.strip(), owner_due.strip(), cid))
+    _save_attendees(c, cid, qcells_person_ids, tpo_contact_ids, qcells_other, tpo_other)
+    aname = c.execute("SELECT name FROM avls WHERE id=?", (avl_id,)).fetchone()["name"]
+    c.commit(); c.close()
+    db.log(user["email"], "call:save", f"{aname} {call_date}")
+    return RedirectResponse(f"/calls?avl={avl_id}", status_code=303)
+
+@app.post("/calls/{cid}/delete")
+def delete_call(cid: int, request: Request, user=Depends(require_editor)):
+    c = db.conn()
+    row = c.execute("SELECT calls.*, a.name AS avl_name FROM calls JOIN avls a ON a.id=calls.avl_id "
+                    "WHERE calls.id=?", (cid,)).fetchone()
+    if row:
+        c.execute("DELETE FROM call_attendees WHERE call_id=?", (cid,))
+        c.execute("DELETE FROM calls WHERE id=?", (cid,))
+        c.commit()
+        db.log(user["email"], "call:delete", f"{row['avl_name']} {row['call_date']}")
+    c.close()
+    return RedirectResponse(f"/calls?avl={row['avl_id'] if row else 0}", status_code=303)
 
 # ---------------- history / changelog ----------------
 @app.get("/history", response_class=HTMLResponse)
@@ -330,6 +413,7 @@ def team(request: Request, user=Depends(require_user)):
     active_people = [p for p in people if p["active"]]
     load = {r["person_id"]: r["n"] for r in c.execute(
         "SELECT person_id, COUNT(*) AS n FROM assignments WHERE ended_at IS NULL GROUP BY person_id")}
+    orgs = db.orgs_in_use(c)
     avls = c.execute("SELECT id, name FROM avls WHERE active=1 ORDER BY name").fetchall()
     products = c.execute("SELECT id, name FROM products WHERE active=1 ORDER BY category, name").fetchall()
     current = c.execute(
@@ -351,11 +435,17 @@ def team(request: Request, user=Depends(require_user)):
     return templates.TemplateResponse(request, "team.html", {"user": user, "people": people,
         "active_people": active_people, "load": load,
         "avls": avls, "products": products, "current": current, "past": past,
-        "cov": cov, "roles": db.ROLES, "orgs": db.ORGS})
+        "cov": cov, "roles": db.ROLES, "orgs": orgs})
+
+def _org_value(org, org_other):
+    """"Other" is a prompt to define the team, not a bucket to file people in."""
+    o = (org or "").strip()
+    return (org_other or "").strip() if o in ("", "Other") and org_other.strip() else o
 
 @app.post("/team/person/add")
 def add_person(request: Request, name: str = Form(...), email: str = Form(""),
-               org: str = Form(""), user=Depends(require_editor)):
+               org: str = Form(""), org_other: str = Form(""), user=Depends(require_editor)):
+    org = _org_value(org, org_other)
     nm = name.strip()
     if not nm:
         return RedirectResponse("/team", status_code=303)
@@ -376,7 +466,8 @@ def add_person(request: Request, name: str = Form(...), email: str = Form(""),
 
 @app.post("/team/person/{person_id}/save")
 def save_person(person_id: int, request: Request, name: str = Form(...), email: str = Form(""),
-                org: str = Form(""), user=Depends(require_editor)):
+                org: str = Form(""), org_other: str = Form(""), user=Depends(require_editor)):
+    org = _org_value(org, org_other)
     nm = name.strip()
     if not nm:
         return RedirectResponse("/team", status_code=303)
@@ -517,37 +608,147 @@ def export_calls(request: Request, user=Depends(require_user)):
                                 "Topics", "Outcomes", "Owner/Due", "Logged by"], "avl_calls.csv")
 
 # ---------------- 3) action items ----------------
+def _requirement_picker(c, avl_id=None):
+    """avl -> product -> [requirement] for the checklist-link dropdowns."""
+    q = ("SELECT ci.id, ci.workstream, ci.doc_category, ci.status, ci.product_id, ci.avl_id, "
+         "p.name AS product FROM checklist_items ci JOIN products p ON p.id=ci.product_id ")
+    args = []
+    if avl_id:
+        q += "WHERE ci.avl_id=? "
+        args.append(avl_id)
+    tree = {}
+    for r in c.execute(q + "ORDER BY p.name, ci.sort_order, ci.id", args):
+        tree.setdefault(str(r["avl_id"]), {}).setdefault(
+            str(r["product_id"]), {"name": r["product"], "items": []})["items"].append(
+            {"id": r["id"], "ws": r["workstream"], "cat": r["doc_category"], "status": r["status"]})
+    return tree
+
 @app.get("/actions", response_class=HTMLResponse)
-def actions(request: Request, show: str = "open", user=Depends(require_user)):
+def actions(request: Request, show: str = "open", avl: int = 0, owner: int = 0,
+            edit: int = 0, user=Depends(require_user)):
     c = db.conn()
     avls = c.execute("SELECT id, name FROM avls WHERE active=1 ORDER BY name").fetchall()
-    q = ("SELECT actions.*, a.name AS avl_name FROM actions LEFT JOIN avls a ON a.id=actions.avl_id ")
-    q += "" if show == "all" else "WHERE actions.status='Open' "
-    rows = c.execute(q + "ORDER BY CASE WHEN due_date='' THEN 1 ELSE 0 END, due_date").fetchall()
+    people = c.execute("SELECT id, name, org FROM people WHERE active=1 ORDER BY name").fetchall()
+    q = ("SELECT actions.*, a.name AS avl_name, pe.name AS owner_name, "
+         "pr.name AS product_name, ci.workstream, ci.doc_category, ci.status AS req_status "
+         "FROM actions "
+         "LEFT JOIN avls a ON a.id=actions.avl_id "
+         "LEFT JOIN people pe ON pe.id=actions.owner_person_id "
+         "LEFT JOIN checklist_items ci ON ci.id=actions.checklist_item_id "
+         "LEFT JOIN products pr ON pr.id=actions.product_id WHERE 1=1 ")
+    params = []
+    if show != "all":
+        q += "AND actions.status='Open' "
+    if avl:
+        q += "AND actions.avl_id=? "
+        params.append(avl)
+    if owner:
+        q += "AND actions.owner_person_id=? "
+        params.append(owner)
+    rows = c.execute(q + "ORDER BY CASE WHEN COALESCE(due_date,'')='' THEN 1 ELSE 0 END, "
+                     "due_date, actions.id DESC", params).fetchall()
     today = datetime.date.today().isoformat()
+    n_overdue = sum(1 for r in rows if r["status"] == "Open" and r["due_date"] and r["due_date"] < today)
+    tree = _requirement_picker(c)
     c.close()
     return templates.TemplateResponse(request, "actions.html", {"user": user, "rows": rows,
-                                                                "avls": avls, "show": show, "today": today})
+        "avls": avls, "people": people, "show": show, "today": today, "sel_a": avl,
+        "sel_o": owner, "edit": edit, "tree": tree, "priorities": db.ACTION_PRIORITIES,
+        "n_overdue": n_overdue})
+
+def _action_fields(c, avl_id, product_id, checklist_item_id, owner_person_id):
+    """A linked requirement is authoritative for the AVL and product it belongs to."""
+    def as_id(v):
+        # 0 is the "any / none" sentinel the filter selects use; never a real row.
+        return int(v) if str(v).strip().isdigit() and int(v) > 0 else None
+    aid, pid, cid = as_id(avl_id), as_id(product_id), as_id(checklist_item_id)
+    if cid:
+        row = c.execute("SELECT avl_id, product_id FROM checklist_items WHERE id=?", (cid,)).fetchone()
+        if row:
+            aid, pid = row["avl_id"], row["product_id"]
+        else:
+            cid = None
+    oid = as_id(owner_person_id)
+    oname = ""
+    if oid:
+        row = c.execute("SELECT name FROM people WHERE id=? AND active=1", (oid,)).fetchone()
+        oname = row["name"] if row else ""
+        oid = oid if row else None
+    return aid, pid, cid, oid, oname
 
 @app.post("/actions/add")
 def add_action(request: Request, description: str = Form(...), avl_id: str = Form(""),
-               owner: str = Form(""), due_date: str = Form(""), call_id: str = Form(""),
-               user=Depends(require_editor)):
+               product_id: str = Form(""), checklist_item_id: str = Form(""),
+               owner_person_id: str = Form(""), owner_other: str = Form(""),
+               due_date: str = Form(""), priority: str = Form("Normal"),
+               call_id: str = Form(""), user=Depends(require_editor)):
+    desc = description.strip()
+    if not desc:
+        return RedirectResponse("/actions", status_code=303)
+    if priority not in db.ACTION_PRIORITIES:
+        priority = "Normal"
     c = db.conn()
-    c.execute("INSERT INTO actions(avl_id, call_id, description, owner, due_date, created_by, created_at) "
-              "VALUES(?,?,?,?,?,?,?)",
-              (int(avl_id) if avl_id else None, int(call_id) if call_id else None,
-               description.strip(), owner.strip(), due_date, user["email"], now()))
+    aid, pid, cid, oid, oname = _action_fields(c, avl_id, product_id, checklist_item_id,
+                                               owner_person_id)
+    c.execute("INSERT INTO actions(avl_id, product_id, checklist_item_id, call_id, description, "
+              "owner, owner_person_id, due_date, priority, created_by, created_at) "
+              "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+              (aid, pid, cid, int(call_id) if call_id.strip().isdigit() else None, desc,
+               oname or owner_other.strip(), oid, due_date, priority, user["email"], now()))
     c.commit(); c.close()
-    db.log(user["email"], "action:add", description[:80])
-    return RedirectResponse("/actions", status_code=303)
+    db.log(user["email"], "action:add", desc[:80])
+    return RedirectResponse(f"/actions?avl={aid or 0}", status_code=303)
+
+@app.post("/actions/{aid_}/save")
+def save_action(aid_: int, request: Request, description: str = Form(...), avl_id: str = Form(""),
+                product_id: str = Form(""), checklist_item_id: str = Form(""),
+                owner_person_id: str = Form(""), owner_other: str = Form(""),
+                due_date: str = Form(""), priority: str = Form("Normal"),
+                user=Depends(require_editor)):
+    desc = description.strip()
+    if priority not in db.ACTION_PRIORITIES:
+        priority = "Normal"
+    c = db.conn()
+    if not desc or not c.execute("SELECT 1 FROM actions WHERE id=?", (aid_,)).fetchone():
+        c.close()
+        return RedirectResponse("/actions", status_code=303)
+    aid, pid, cid, oid, oname = _action_fields(c, avl_id, product_id, checklist_item_id,
+                                               owner_person_id)
+    prev = c.execute("SELECT owner FROM actions WHERE id=?", (aid_,)).fetchone()
+    owner_txt = oname or owner_other.strip() or (prev["owner"] if prev and not oid else "")
+    c.execute("UPDATE actions SET avl_id=?, product_id=?, checklist_item_id=?, description=?, "
+              "owner=?, owner_person_id=?, due_date=?, priority=? WHERE id=?",
+              (aid, pid, cid, desc, owner_txt, oid, due_date, priority, aid_))
+    c.commit(); c.close()
+    db.log(user["email"], "action:save", desc[:80])
+    return RedirectResponse(f"/actions?avl={aid or 0}", status_code=303)
 
 @app.post("/actions/{aid}/done")
 def action_done(aid: int, request: Request, user=Depends(require_editor)):
     c = db.conn()
     c.execute("UPDATE actions SET status='Done', closed_at=? WHERE id=?", (now(), aid))
+    row = c.execute("SELECT description FROM actions WHERE id=?", (aid,)).fetchone()
     c.commit(); c.close()
-    db.log(user["email"], "action:done", str(aid))
+    db.log(user["email"], "action:done", (row["description"][:80] if row else str(aid)))
+    return RedirectResponse("/actions", status_code=303)
+
+@app.post("/actions/{aid}/reopen")
+def action_reopen(aid: int, request: Request, user=Depends(require_editor)):
+    c = db.conn()
+    c.execute("UPDATE actions SET status='Open', closed_at=NULL WHERE id=?", (aid,))
+    row = c.execute("SELECT description FROM actions WHERE id=?", (aid,)).fetchone()
+    c.commit(); c.close()
+    db.log(user["email"], "action:reopen", (row["description"][:80] if row else str(aid)))
+    return RedirectResponse("/actions?show=all", status_code=303)
+
+@app.post("/actions/{aid}/delete")
+def action_delete(aid: int, request: Request, user=Depends(require_editor)):
+    c = db.conn()
+    row = c.execute("SELECT description FROM actions WHERE id=?", (aid,)).fetchone()
+    c.execute("DELETE FROM actions WHERE id=?", (aid,))
+    c.commit(); c.close()
+    if row:
+        db.log(user["email"], "action:delete", row["description"][:80])
     return RedirectResponse("/actions", status_code=303)
 
 # ---------------- 4) PPTX exports ----------------
@@ -1025,10 +1226,20 @@ def files(request: Request, kind: str = "", ref: int = 0, user=Depends(require_u
             q += " AND ref_id=?"
             params.append(ref)
     atts = c.execute(q + " ORDER BY id DESC", params).fetchall()
+    # How many files sit under each bundle target, so the download side can say
+    # up front whether there is anything to fetch.
+    counts = {"product": {}, "avl": {}, "call": {}, "checklist": {}}
+    for r in c.execute("SELECT kind, ref_id, COUNT(*) n FROM attachments GROUP BY kind, ref_id"):
+        counts.setdefault(r["kind"], {})[r["ref_id"]] = r["n"]
+    n_checklists = c.execute("SELECT COUNT(*) FROM (SELECT 1 FROM checklist_items "
+                             "GROUP BY product_id, avl_id)").fetchone()[0]
+    n_combos = c.execute("SELECT (SELECT COUNT(*) FROM avls WHERE active=1) * "
+                         "(SELECT COUNT(*) FROM products WHERE active=1)").fetchone()[0]
     c.close()
     return templates.TemplateResponse(request, "files.html", {"user": user, "products": products,
         "avls": avls, "calls": calls_, "checks": checks, "atts": atts, "names": names,
-        "picker": picker, "f_kind": kind, "f_ref": ref})
+        "picker": picker, "f_kind": kind, "f_ref": ref, "bundle_kinds": BUNDLE_KINDS,
+        "counts": counts, "n_checklists": n_checklists, "n_combos": n_combos})
 
 @app.post("/files/upload")
 async def upload(request: Request, kind: str = Form(...), ref_id: int = Form(...),
@@ -1092,6 +1303,131 @@ def delete_file(att_id: int, request: Request, next_url: str = Form(""),
         db.log(user["email"], "file:delete", row["filename"])
     c.close()
     return RedirectResponse(dest, status_code=303)
+
+BUNDLE_KINDS = {
+    "checklist": "One workstream requirement",
+    "product": "Product (files filed at product level)",
+    "avl": "TPO AVL (files filed at AVL level)",
+    "call": "Call",
+    "product_all": "Everything for a product (all AVLs)",
+    "avl_all": "Everything for a TPO AVL (all products + calls)",
+}
+
+def _bundle_files(c, kind, ref_id):
+    """(label, [(folder, attachment_row)]) for a download bundle."""
+    def plain(k, table, col="name"):
+        row = c.execute(f"SELECT {col} AS n FROM {table} WHERE id=?", (ref_id,)).fetchone()
+        if not row:
+            return None, []
+        atts = c.execute("SELECT * FROM attachments WHERE kind=? AND ref_id=? ORDER BY id",
+                         (k, ref_id)).fetchall()
+        return row["n"], [("", a) for a in atts]
+
+    if kind == "product":
+        return plain("product", "products")
+    if kind == "avl":
+        return plain("avl", "avls")
+    if kind == "call":
+        row = c.execute("SELECT calls.call_date, a.name AS avl_name FROM calls "
+                        "JOIN avls a ON a.id=calls.avl_id WHERE calls.id=?", (ref_id,)).fetchone()
+        if not row:
+            return None, []
+        atts = c.execute("SELECT * FROM attachments WHERE kind='call' AND ref_id=? ORDER BY id",
+                         (ref_id,)).fetchall()
+        return f"{row['avl_name']} {row['call_date']}", [("", a) for a in atts]
+    if kind == "checklist":
+        row = c.execute("SELECT ci.*, p.name AS product, a.name AS avl_name FROM checklist_items ci "
+                        "JOIN products p ON p.id=ci.product_id JOIN avls a ON a.id=ci.avl_id "
+                        "WHERE ci.id=?", (ref_id,)).fetchone()
+        if not row:
+            return None, []
+        atts = c.execute("SELECT * FROM attachments WHERE kind='checklist' AND ref_id=? ORDER BY id",
+                         (ref_id,)).fetchall()
+        return f"{row['avl_name']} {row['product']} - {row['workstream']}", [("", a) for a in atts]
+
+    # Roll-ups: everything filed anywhere under one product or one AVL.
+    out = []
+    if kind == "product_all":
+        row = c.execute("SELECT name FROM products WHERE id=?", (ref_id,)).fetchone()
+        if not row:
+            return None, []
+        for a in c.execute("SELECT * FROM attachments WHERE kind='product' AND ref_id=? ORDER BY id",
+                           (ref_id,)):
+            out.append(("00_product-level", a))
+        for r in c.execute(
+                "SELECT att.*, av.name AS avl_name, ci.doc_category, ci.workstream "
+                "FROM attachments att JOIN checklist_items ci ON ci.id=att.ref_id "
+                "JOIN avls av ON av.id=ci.avl_id "
+                "WHERE att.kind='checklist' AND ci.product_id=? ORDER BY av.name, ci.sort_order",
+                (ref_id,)):
+            out.append((f"{r['avl_name']}/{r['doc_category'] or 'Other'}", r))
+        return row["name"], out
+
+    if kind == "avl_all":
+        row = c.execute("SELECT name FROM avls WHERE id=?", (ref_id,)).fetchone()
+        if not row:
+            return None, []
+        for a in c.execute("SELECT * FROM attachments WHERE kind='avl' AND ref_id=? ORDER BY id",
+                           (ref_id,)):
+            out.append(("00_avl-level", a))
+        for r in c.execute(
+                "SELECT att.*, cl.call_date FROM attachments att JOIN calls cl ON cl.id=att.ref_id "
+                "WHERE att.kind='call' AND cl.avl_id=? ORDER BY cl.call_date", (ref_id,)):
+            out.append((f"01_calls/{r['call_date']}", r))
+        for r in c.execute(
+                "SELECT att.*, p.name AS product, ci.doc_category FROM attachments att "
+                "JOIN checklist_items ci ON ci.id=att.ref_id JOIN products p ON p.id=ci.product_id "
+                "WHERE att.kind='checklist' AND ci.avl_id=? ORDER BY p.name, ci.sort_order",
+                (ref_id,)):
+            out.append((f"{r['product']}/{r['doc_category'] or 'Other'}", r))
+        return row["name"], out
+    return None, []
+
+@app.get("/files/bundle.zip")
+def files_bundle(request: Request, kind: str = "", ref_id: int = 0, user=Depends(require_user)):
+    """Download side of the uploader: the same targets, zipped with a manifest."""
+    if kind not in BUNDLE_KINDS or not ref_id:
+        return RedirectResponse("/files?err=badtarget", status_code=303)
+    c = db.conn()
+    label, items = _bundle_files(c, kind, ref_id)
+    c.close()
+    if label is None:
+        return RedirectResponse("/files?err=badtarget", status_code=303)
+    if not items:
+        return RedirectResponse(f"/files?err=empty&kind={kind}&ref={ref_id}", status_code=303)
+
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base = f"{_safe(label, 60)}_{stamp}"
+    path = os.path.join(PKG_DIR, base + ".zip")
+    rows, missing = [], 0
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        seen = set()
+        for folder, a in items:
+            if not os.path.exists(a["stored_path"]):
+                missing += 1
+                rows.append([folder or "/", a["filename"], a["uploaded_by"],
+                             (a["uploaded_at"] or "")[:16], "FILE NOT FOUND ON DISK"])
+                continue
+            arc = f"{_safe_path(folder)}/{_safe(a['filename'], 90)}" if folder else _safe(a["filename"], 90)
+            n = 1
+            while arc in seen:            # same filename twice under one folder
+                stem, _, ext = arc.rpartition(".")
+                arc = f"{stem}_{n}.{ext}" if stem else f"{arc}_{n}"
+                n += 1
+            seen.add(arc)
+            z.write(a["stored_path"], arc)
+            rows.append([folder or "/", a["filename"], a["uploaded_by"],
+                         (a["uploaded_at"] or "")[:16], arc])
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["Folder", "File", "Uploaded by", "Uploaded at", "Path in zip"])
+        for r in rows:
+            w.writerow(r)
+        z.writestr("MANIFEST.csv", buf.getvalue())
+
+    db.log(user["email"], "files:bundle",
+           f"{BUNDLE_KINDS[kind]} '{label}' - {len(items) - missing} file(s)")
+    return FileResponse(path, filename=base + ".zip", media_type="application/zip")
 
 @app.get("/files/{att_id}/download")
 def download(att_id: int, request: Request, user=Depends(require_user)):
@@ -1226,8 +1562,13 @@ PKG_DIR = os.path.join(UPLOAD_DIR, "packages")
 os.makedirs(PKG_DIR, exist_ok=True)
 
 def _safe(name, limit=80):
-    s = _re.sub(r"[^A-Za-z0-9 ._()-]", "_", (name or "").strip())
+    """One path segment, safe on Windows and macOS. & and , are legal, / is not."""
+    s = _re.sub(r"[^A-Za-z0-9 ._()&,+-]", "_", (name or "").strip())
     return (_re.sub(r"_+", "_", s)[:limit] or "item").strip(" ._")
+
+def _safe_path(path, limit=60):
+    """Sanitise each segment so 'Product/Category' nests instead of flattening."""
+    return "/".join(_safe(seg, limit) for seg in str(path or "").split("/") if seg.strip())
 
 def _package_contents(c, product_id, avl_id, scope):
     """Every in-scope requirement with its files, in checklist order.

@@ -6,8 +6,9 @@
 <td>{{ p.name }}</td><td>{{ p.category }}</td>
 <td><form method="post" action="/products/{{ p.id }}/reps" class="inline">
 <select name="person_ids" multiple size="3" class="rosterpick">
-{% for r in ce %}<option value="{{ r.id }}" {% if r.id in holders['product'].get(p.id, []) %}selected{% endif %}>{{ r.name }}</option>{% endfor %}
-</select><button>Save</button></form></td>
+{% for label, folk in prod_opts.get(p.id, []) %}<optgroup label="{{ label }}">
+{% for r in folk %}<option value="{{ r.id }}" {% if r.id in holders['product'].get(p.id, []) %}selected{% endif %}>{{ r.name }}{% if label != 'Technical teams' %} &mdash; {{ r.org or 'unassigned' }}{% endif %}</option>{% endfor %}
+</optgroup>{% endfor %}</select><button>Save</button></form></td>
 <td><form method="post" action="/products/{{ p.id }}/lifecycle" class="inline">
 <select name="lifecycle"><option {% if p.lifecycle=='Roadmap' %}selected{% endif %}>Roadmap</option>
 <option {% if p.lifecycle=='Active' %}selected{% endif %}>Active</option>
@@ -21,7 +22,8 @@
 <input name="name" placeholder="Product name" required>
 <select name="category">{% for cat in categories %}<option>{{ cat }}</option>{% endfor %}</select>
 <select name="person_ids" multiple size="3" class="rosterpick">
-{% for r in ce %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}</select>
+{% for label, folk in new_prod_opts %}<optgroup label="{{ label }}">
+{% for r in folk %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}</optgroup>{% endfor %}</select>
 <select name="lifecycle"><option>Roadmap</option><option selected>Active</option></select>
 <input name="launch_status" placeholder="Released / target Q4-26">
 <button>Add</button></form></div>
@@ -32,9 +34,13 @@
 <td>{{ a.name }}</td>
 <td colspan="2"><form method="post" action="/avls/{{ a.id }}/managers" class="inline">
 <select name="account_manager_id"><option value="">- vacant -</option>
-{% for r in sales %}<option value="{{ r.id }}" {% if r.id in holders['avl'].get(a.id, {}).get('am', []) %}selected{% endif %}>{{ r.name }}</option>{% endfor %}</select>
+{% for label, folk in avl_opts.get(a.id, {}).get("am", []) %}<optgroup label="{{ label }}">
+{% for r in folk %}<option value="{{ r.id }}" {% if r.id in holders["avl"].get(a.id, {}).get("am", []) %}selected{% endif %}>{{ r.name }} &mdash; {{ r.org or "unassigned" }}</option>{% endfor %}
+</optgroup>{% endfor %}</select>
 <select name="sr_commercial_rep_id"><option value="">- vacant -</option>
-{% for r in sales %}<option value="{{ r.id }}" {% if r.id in holders['avl'].get(a.id, {}).get('scr', []) %}selected{% endif %}>{{ r.name }}</option>{% endfor %}</select>
+{% for label, folk in avl_opts.get(a.id, {}).get("scr", []) %}<optgroup label="{{ label }}">
+{% for r in folk %}<option value="{{ r.id }}" {% if r.id in holders["avl"].get(a.id, {}).get("scr", []) %}selected{% endif %}>{{ r.name }} &mdash; {{ r.org or "unassigned" }}</option>{% endfor %}
+</optgroup>{% endfor %}</select>
 <button>Save</button></form></td>
 <td><form method="post" action="/avls/{{ a.id }}/toggle" class="inline"><button>{{ 'Remove' if a.active else 'Restore' }}</button></form></td>
 </tr>{% endfor %}</table>
@@ -42,13 +48,16 @@
 <form method="post" action="/avls/add" class="row">
 <input name="name" placeholder="TPO / AVL name" required>
 <select name="account_manager_id"><option value="">- Account Manager -</option>
-{% for r in sales %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}</select>
+{% for lbl, folk in new_avl_opts %}<optgroup label="{{ lbl }}">{% for r in folk %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}</optgroup>{% endfor %}</select>
 <select name="sr_commercial_rep_id"><option value="">- Sr. Commercial Rep -</option>
-{% for r in sales %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}</select>
+{% for lbl, folk in new_avl_opts %}<optgroup label="{{ lbl }}">{% for r in folk %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}</optgroup>{% endfor %}</select>
 <button>Add</button></form></div>
 </div>
 <p class="hint">People come from the roster on <a href="/team">Team</a> &mdash; add or retire someone there and
-they appear in (or drop out of) every picker here. Saving a seat writes a dated assignment, so
+they appear in (or drop out of) every picker here. Pickers list the teams usually filling a seat first and
+everyone else under "Other teams", so pulling in RBO or another group is never blocked. Sales is left out
+of the Prod/Tech rep list entirely &mdash; if a technical person sits on another team, set that team on
+<a href="/team">Team</a> and they appear under "Other teams". Saving a seat writes a dated assignment, so
 <a href="/team">Team</a> keeps the full history of who covered what and when. Ctrl/Cmd-click to pick more than one
 Prod/Tech rep. Lifecycle: Roadmap = future launch (target date in the field), Active = on market,
 EOL = end of life (hidden from the matrix by default, history retained). Remove = soft delete for mistakes.</p>

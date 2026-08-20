@@ -9,7 +9,56 @@ STATUSES = ["Listed", "In Review", "Execution", "Engagement", "Opportunity",
 ROLES = ["Account Manager (Sales)", "Sr. Commercial Rep (Sales)", "Product/Technical Rep (CE)"]
 
 # Which side of the house someone sits on; drives who appears in each role picker.
-ORGS = ["Sales", "Products / CE", "Other"]
+# Internal Qcells teams a person can sit in. Not a closed set: anything already
+# stored is offered alongside these, and "Other" is defined free-text.
+ORGS = ["Sales", "Products / CE", "RBO", "Procurement / Sourcing", "Product Management",
+        "Engineering / Technical", "Quality", "Operations", "Supply Chain",
+        "Finance", "Legal / Compliance", "Marketing", "IT", "Executive", "Other"]
+
+# Which orgs are conventionally offered first for each trifecta seat. These only
+# reorder the Manage pickers - anybody on the roster can still be assigned, since
+# an org list can never anticipate every real staffing arrangement.
+ORG_ROLE_HINTS = {
+    ROLES[0]: ("Sales & account teams", ("Sales", "RBO", "Product Management", "Executive")),
+    ROLES[1]: ("Sales & account teams", ("Sales", "RBO", "Product Management", "Executive")),
+    ROLES[2]: ("Technical teams", ("Products / CE", "Engineering / Technical", "Quality",
+                                   "Product Management")),
+}
+
+def orgs_in_use(c):
+    """The standard list plus any custom org already saved, so values round-trip."""
+    seen = [r["org"] for r in c.execute(
+        "SELECT DISTINCT org FROM people WHERE COALESCE(org,'')<>'' ORDER BY org")]
+    return ORGS + [o for o in seen if o not in ORGS]
+
+# Orgs that are never offered for a seat, because the pairing does not exist.
+# Sales people are not Product/Technical reps; if a technical person sits on
+# another team, give them that team on the roster and they show up under "Other
+# teams" instead.
+ORG_ROLE_EXCLUDE = {
+    ROLES[2]: ("Sales",),
+}
+
+def role_options(people, role, held_ids=()):
+    """Grouped picker options for one seat: [(group label, [people]), ...].
+
+    Anyone already holding the seat is always listed, even if their org is
+    excluded, so opening the form can never silently drop them.
+    """
+    label, hint = ORG_ROLE_HINTS.get(role, ("Suggested", ()))
+    excl = ORG_ROLE_EXCLUDE.get(role, ())
+    held = set(held_ids)
+    suggested = [p for p in people if p["org"] in hint]
+    others = [p for p in people if p["org"] not in hint and p["org"] not in excl]
+    stale = [p for p in people if p["org"] in excl and p["id"] in held]
+    groups = []
+    if suggested:
+        groups.append((label, suggested))
+    if others:
+        groups.append(("Other teams", others))
+    if stale:
+        groups.append(("Currently assigned", stale))
+    return groups
 
 def conn():
     c = sqlite3.connect(DB_PATH)
@@ -154,6 +203,14 @@ def _migrate(c):
         if ti and col not in ti:
             c.execute(f"ALTER TABLE workstream_template_items ADD COLUMN {col} {ddl}")
             c.commit()
+    ac = [r[1] for r in c.execute("PRAGMA table_info(actions)")]
+    # Actions gain a roster-backed owner and an optional link to the requirement
+    # they unblock.
+    for col, ddl in (("owner_person_id", "INTEGER"), ("product_id", "INTEGER"),
+                     ("checklist_item_id", "INTEGER"), ("priority", "TEXT DEFAULT 'Normal'")):
+        if col not in ac:
+            c.execute(f"ALTER TABLE actions ADD COLUMN {col} {ddl}")
+            c.commit()
     tt = [r[1] for r in c.execute("PRAGMA table_info(workstream_templates)")]
     if tt and "source_url" not in tt:
         c.execute("ALTER TABLE workstream_templates ADD COLUMN source_url TEXT DEFAULT ''")
@@ -225,6 +282,8 @@ def init_db():
     _seed_team(c)
     _seed_workstream_templates(c)
     _adopt_freetext_reps(c)
+    _adopt_call_attendees(c)
+    _adopt_action_owners(c)
     c.close()
 
 def log(user_email, action, detail=""):
@@ -284,6 +343,14 @@ CREATE TABLE IF NOT EXISTS packages(
   bytes INTEGER DEFAULT 0, stored_path TEXT DEFAULT '', manifest TEXT DEFAULT '',
   created_by TEXT, created_at TEXT);
 CREATE INDEX IF NOT EXISTS ix_packages_pa ON packages(product_id, avl_id);
+CREATE TABLE IF NOT EXISTS call_attendees(
+  id INTEGER PRIMARY KEY,
+  call_id INTEGER NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
+  side TEXT NOT NULL,                 -- 'qcells' | 'tpo'
+  person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+  name TEXT NOT NULL);                -- kept so history survives a delete
+CREATE INDEX IF NOT EXISTS ix_call_att ON call_attendees(call_id, side);
 """
 
 # Starter template library, imported from the EnFin AVL Requirements Trackers.
@@ -485,3 +552,87 @@ def scope_filter(scope):
     if scope == "req_cond":
         return "AND obligation IN ('Required','Conditional') ", []
     return "", []
+
+
+# ---------------- call attendees (v12) ----------------
+# Attendees are picked from the Qcells roster and the TPO contact list, with a
+# free-text field for one-off guests. The names stay denormalised onto calls so
+# the CSV export and weekly digest keep working unchanged.
+CALL_TYPES = ["Joint", "Technical", "Commercial", "Intro", "QBR", "Escalation", "Site visit"]
+
+def call_attendees(c, call_id):
+    rows = c.execute("SELECT * FROM call_attendees WHERE call_id=? ORDER BY side, name",
+                     (call_id,)).fetchall()
+    out = {"qcells": [], "tpo": []}
+    for r in rows:
+        out.setdefault(r["side"], []).append(r)
+    return out
+
+def set_call_attendees(c, call_id, side, person_ids=(), contact_ids=(), other=""):
+    """Replace one side's attendee list and refresh the cached name string."""
+    c.execute("DELETE FROM call_attendees WHERE call_id=? AND side=?", (call_id, side))
+    for pid in person_ids:
+        row = c.execute("SELECT name FROM people WHERE id=?", (pid,)).fetchone()
+        if row:
+            c.execute("INSERT INTO call_attendees(call_id, side, person_id, name) VALUES(?,?,?,?)",
+                      (call_id, side, pid, row["name"]))
+    for cid in contact_ids:
+        row = c.execute("SELECT name FROM contacts WHERE id=?", (cid,)).fetchone()
+        if row:
+            c.execute("INSERT INTO call_attendees(call_id, side, contact_id, name) VALUES(?,?,?,?)",
+                      (call_id, side, cid, row["name"]))
+    for nm in _re_split(other or ""):
+        nm = nm.strip()
+        if nm:
+            c.execute("INSERT INTO call_attendees(call_id, side, name) VALUES(?,?,?)",
+                      (call_id, side, nm))
+    names = [r["name"] for r in c.execute(
+        "SELECT name FROM call_attendees WHERE call_id=? AND side=? ORDER BY name",
+        (call_id, side))]
+    col = "qcells_attendees" if side == "qcells" else "tpo_attendees"
+    c.execute(f"UPDATE calls SET {col}=? WHERE id=?", (", ".join(names), call_id))
+
+def _adopt_call_attendees(c):
+    """One-time: parse the free-text attendee strings into structured rows."""
+    if c.execute("SELECT value FROM meta WHERE key='call_attendees_adopted'").fetchone():
+        return
+    people = {r["name"].strip().rstrip(".").lower(): r["id"]
+              for r in c.execute("SELECT id, name FROM people")}
+    for call in c.execute("SELECT id, avl_id, qcells_attendees, tpo_attendees FROM calls").fetchall():
+        contacts = {r["name"].strip().lower(): r["id"] for r in c.execute(
+            "SELECT id, name FROM contacts WHERE avl_id=?", (call["avl_id"],))}
+        for side, raw, lookup in (("qcells", call["qcells_attendees"], people),
+                                  ("tpo", call["tpo_attendees"], contacts)):
+            pids, cids, rest = [], [], []
+            for nm in _re_split(raw or ""):
+                key = nm.strip().rstrip(".").lower()
+                if side == "qcells" and key in lookup:
+                    pids.append(lookup[key])
+                elif side == "tpo" and key in lookup:
+                    cids.append(lookup[key])
+                elif nm.strip():
+                    rest.append(nm.strip())
+            if pids or cids or rest:
+                set_call_attendees(c, call["id"], side, pids, cids, ", ".join(rest))
+    c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('call_attendees_adopted', ?)",
+              (datetime.datetime.now().isoformat(timespec="seconds"),))
+    c.commit()
+
+
+# ---------------- action items (v13) ----------------
+ACTION_PRIORITIES = ["High", "Normal", "Low"]
+
+def _adopt_action_owners(c):
+    """One-time: match typed-in action owners to the roster where they line up."""
+    if c.execute("SELECT value FROM meta WHERE key='action_owners_adopted'").fetchone():
+        return
+    people = {r["name"].strip().rstrip(".").lower(): r["id"]
+              for r in c.execute("SELECT id, name FROM people")}
+    for r in c.execute("SELECT id, owner FROM actions WHERE COALESCE(owner,'')<>'' "
+                       "AND owner_person_id IS NULL").fetchall():
+        pid = people.get((r["owner"] or "").strip().rstrip(".").lower())
+        if pid:
+            c.execute("UPDATE actions SET owner_person_id=? WHERE id=?", (pid, r["id"]))
+    c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('action_owners_adopted', ?)",
+              (datetime.datetime.now().isoformat(timespec="seconds"),))
+    c.commit()

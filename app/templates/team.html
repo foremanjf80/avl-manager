@@ -18,7 +18,8 @@ consistent and every change keeps a dated history.</p>
 <form method="post" action="/team/person/add" class="row">
 <input name="name" placeholder="Full name" required>
 <input name="email" placeholder="email@qcells.com">
-<select name="org">{% for o in orgs %}<option>{{ o }}</option>{% endfor %}</select>
+<select name="org" class="orgpick">{% for o in orgs %}<option>{{ o }}</option>{% endfor %}</select>
+<input name="org_other" class="orgother" placeholder="Define the team" size="18" style="display:none">
 <button>Add</button></form>
 <p class="hint">Adding someone already retired brings them back rather than creating a duplicate.</p></div>
 
@@ -36,16 +37,33 @@ consistent and every change keeps a dated history.</p>
 <form method="post" action="/team/person/{{ p.id }}/save">
 <td><input name="name" value="{{ p.name }}" size="20" required></td>
 <td><input name="email" value="{{ p.email }}" size="24" placeholder="email@qcells.com"></td>
-<td><select name="org">{% for o in orgs %}<option {% if p.org==o %}selected{% endif %}>{{ o }}</option>{% endfor %}</select></td>
+<td><select name="org" class="orgpick">
+{% for o in orgs %}<option {% if p.org==o %}selected{% endif %}>{{ o }}</option>{% endfor %}</select>
+<input name="org_other" class="orgother" placeholder="Define the team" size="16" style="display:none"></td>
 <td class="sub2">{{ load.get(p.id, 0) }}</td>
 <td><button>Save</button></td></form>
 <td><form method="post" action="/team/person/{{ p.id }}/toggle" class="inline"
       {% if p.active and load.get(p.id, 0) %}onsubmit="return confirm('Retire {{ p.name }}? Their {{ load[p.id] }} live assignment(s) will be ended and their seats left vacant.')"{% endif %}>
 <button>{{ 'Retire' if p.active else 'Restore' }}</button></form></td>
 </tr>{% endfor %}</table>
-<p class="hint">Org decides which pickers someone shows up in: Sales for Account Manager and Sr. Commercial Rep,
-Products / CE for Product/Technical Rep. "Other" appears in both. Retiring ends live assignments and
-removes the person from every dropdown; their history stays.</p></div>
+<p class="hint">Org is the team someone sits on. It orders the seat pickers on <a href="/manage">Manage</a>
+&mdash; Sales / RBO first for Account Manager and Sr. Commercial Rep, Products / CE and Engineering first for
+Product/Technical Rep &mdash; but never restricts them, so anyone on the roster can hold any seat. Pick
+<b>Other</b> to type a team that is not listed; it is then offered to everyone else too. Retiring ends live
+assignments and removes the person from every dropdown; their history stays.</p></div>
+
+<script>
+// "Other" is a prompt to name the team, not a bucket.
+document.querySelectorAll('.orgpick').forEach(sel => {
+  const txt = sel.parentElement.querySelector('.orgother');
+  const sync = () => {
+    const on = sel.value === 'Other';
+    txt.style.display = on ? '' : 'none';
+    if (on) txt.focus(); else txt.value = '';
+  };
+  sel.addEventListener('change', sync);
+});
+</script>
 
 <div class="card"><h3>Current assignments</h3>
 <table class="list"><tr><th>Person</th><th>Role</th><th>TPO AVL</th><th>Product line</th><th>Since</th><th></th></tr>

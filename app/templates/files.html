@@ -1,29 +1,60 @@
 {% extends "base.html" %}{% block body %}
 <h2>Attachments</h2>
 
+{% if request.query_params.get('err') == 'empty' %}
+<p class="hint" style="color:#b00">Nothing is filed under that target yet, so there was nothing to download.</p>
+{% elif request.query_params.get('err') == 'badtarget' %}
+<p class="hint" style="color:#b00">That download target no longer exists.</p>{% endif %}
+
+<div class="cols">
 <div class="card"><h3>Upload</h3>
-<form method="post" action="/files/upload" enctype="multipart/form-data" class="row" id="upf">
-<select name="kind" id="kindsel" onchange="pick()">
+<form method="post" action="/files/upload" enctype="multipart/form-data" class="picker" id="upf">
+<select name="kind" class="kindsel">
 {% if checks %}<option value="checklist">Workstream requirement</option>{% endif %}
 <option value="product">Product</option><option value="avl">TPO AVL</option><option value="call">Call</option></select>
-
-<span id="grp_checklist" {% if not checks %}style="display:none"{% endif %}>
-<select id="ck_avl" onchange="fillProd()"></select>
-<select id="ck_prod" onchange="fillWs()"></select>
-<select name="ref_id" id="ck_ws"></select>
-</span>
-<select name="ref_id" id="ref_product" disabled style="display:none">{% for p in products %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
-<select name="ref_id" id="ref_avl" disabled style="display:none">{% for a in avls %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select>
-<select name="ref_id" id="ref_call" disabled style="display:none">{% for cl in calls %}<option value="{{ cl.id }}">{{ cl.avl_name }} {{ cl.call_date }}</option>{% endfor %}</select>
+<span class="grp_checklist" {% if not checks %}style="display:none"{% endif %}>
+  <select class="ck_avl"></select><select class="ck_prod"></select>
+  <select name="ref_id" class="ck_ws"></select></span>
+<select name="ref_id" class="ref_product" disabled style="display:none">{% for p in products %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
+<select name="ref_id" class="ref_avl" disabled style="display:none">{% for a in avls %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select>
+<select name="ref_id" class="ref_call" disabled style="display:none">{% for cl in calls %}<option value="{{ cl.id }}">{{ cl.avl_name }} {{ cl.call_date }}</option>{% endfor %}</select>
 <input type="file" name="f" required><button>Upload</button></form>
-<p class="hint">Certs, IE reports, datasheets and TPO requirement docs belong on the workstream requirement
-they satisfy &mdash; they then show up inline on the <a href="/dataroom">Dataroom</a> checklist.
-A requirement only appears here once its checklist has been seeded.</p></div>
+</div>
+
+<div class="card"><h3>Download</h3>
+<form method="get" action="/files/bundle.zip" class="picker">
+<select name="kind" class="kindsel">
+{% for k, lbl in bundle_kinds.items() %}{% if k != 'checklist' or checks %}<option value="{{ k }}">{{ lbl }}</option>{% endif %}{% endfor %}</select>
+<span class="grp_checklist" {% if not checks %}style="display:none"{% endif %}>
+  <select class="ck_avl"></select><select class="ck_prod"></select>
+  <select name="ref_id" class="ck_ws"></select></span>
+<select name="ref_id" class="ref_product" disabled style="display:none">{% for p in products %}<option value="{{ p.id }}">{{ p.name }}{% if counts['product'].get(p.id) %} ({{ counts['product'][p.id] }}){% endif %}</option>{% endfor %}</select>
+<select name="ref_id" class="ref_avl" disabled style="display:none">{% for a in avls %}<option value="{{ a.id }}">{{ a.name }}{% if counts['avl'].get(a.id) %} ({{ counts['avl'][a.id] }}){% endif %}</option>{% endfor %}</select>
+<select name="ref_id" class="ref_call" disabled style="display:none">{% for cl in calls %}<option value="{{ cl.id }}">{{ cl.avl_name }} {{ cl.call_date }}{% if counts['call'].get(cl.id) %} ({{ counts['call'][cl.id] }}){% endif %}</option>{% endfor %}</select>
+<select name="ref_id" class="ref_product_all" disabled style="display:none">{% for p in products %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
+<select name="ref_id" class="ref_avl_all" disabled style="display:none">{% for a in avls %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select>
+<button>Download ZIP</button></form>
+<p class="hint">Same targets as the uploader, plus two roll-ups. Everything-for-a-product and
+everything-for-an-AVL gather what is filed at that level plus its calls and workstream requirements,
+foldered, with a MANIFEST.csv. For a whole dataroom submission use
+<a href="/dataroom/package">Package</a> instead &mdash; it lists the gaps too.</p>
+</div>
+</div>
+
+{% if checks %}
+<p class="hint">Workstream requirements come from seeded checklists &mdash;
+<b>{{ n_checklists }}</b> of {{ n_combos }} product &times; TPO combinations have one so far. To file
+against a different pairing, apply a template to it on the <a href="/dataroom">Dataroom</a> page first.</p>
+{% else %}
+<p class="hint">No checklists seeded yet, so there are no workstream requirements to file against.
+Apply a template to a product &times; TPO on the <a href="/dataroom">Dataroom</a> page to create them.</p>
+{% endif %}
 
 <form method="get" action="/files" class="row" style="margin-bottom:10px">
 <select name="kind" onchange="this.form.submit()"><option value="">All attachments</option>
 {% for k, lbl in [('checklist','Workstream requirement'), ('product','Product'), ('avl','TPO AVL'), ('call','Call')] %}
 <option value="{{ k }}" {% if f_kind==k %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select>
+<span class="sub2" style="align-self:center">{{ atts|length }} file{{ '' if atts|length==1 else 's' }}</span>
 </form>
 
 <table class="list"><tr><th>File</th><th>Applies to</th><th>Re-file</th><th>By</th><th>When</th><th></th></tr>
@@ -44,34 +75,56 @@ A requirement only appears here once its checklist has been seeded.</p></div>
 
 <script>
 const P = {{ picker|tojson }};
+const CK_COUNTS = {{ counts['checklist']|tojson }};
 
-function opt(v, t){const o=document.createElement('option');o.value=v;o.textContent=t;return o;}
+// Upload and Download share one picker; each form drives only its own selects.
+document.querySelectorAll('form.picker').forEach(f => {
+  const kindSel = f.querySelector('.kindsel');
+  const grp = f.querySelector('.grp_checklist');
+  const ckAvl = f.querySelector('.ck_avl'), ckProd = f.querySelector('.ck_prod'), ckWs = f.querySelector('.ck_ws');
+  const showCounts = f.getAttribute('action').indexOf('bundle') > -1;
+  const plain = ['product', 'avl', 'call', 'product_all', 'avl_all'];
 
-function fillAvl(){
-  const s=document.getElementById('ck_avl'); s.innerHTML='';
-  P.avls.forEach(([id, name])=> s.appendChild(opt(id, name)));
-  fillProd();
-}
-function fillProd(){
-  const s=document.getElementById('ck_prod'); s.innerHTML='';
-  const byProd=P.tree[document.getElementById('ck_avl').value]||{};
-  Object.keys(byProd).forEach(pid=> s.appendChild(opt(pid, P.prods[pid]||('#'+pid))));
-  fillWs();
-}
-function fillWs(){
-  const s=document.getElementById('ck_ws'); s.innerHTML='';
-  const byProd=P.tree[document.getElementById('ck_avl').value]||{};
-  (byProd[document.getElementById('ck_prod').value]||[]).forEach(r=>
-    s.appendChild(opt(r.id, (r.cat ? r.cat + ': ' : '') + r.ws + ' [' + r.status + ']')));
-}
-function pick(){
-  const k=document.getElementById('kindsel').value, on=(k==='checklist');
-  document.getElementById('grp_checklist').style.display=on?'':'none';
-  document.getElementById('ck_ws').disabled=!on;
-  ['product','avl','call'].forEach(x=>{const el=document.getElementById('ref_'+x);
-    const sel=(x===k); el.disabled=!sel; el.style.display=sel?'':'none';});
-}
-
-fillAvl(); pick();
+  function opt(v, t) { const o = document.createElement('option'); o.value = v; o.textContent = t; return o; }
+  function fillAvl() {
+    ckAvl.innerHTML = '';
+    P.avls.forEach(([id, name]) => ckAvl.appendChild(opt(id, name)));
+    fillProd();
+  }
+  function fillProd() {
+    ckProd.innerHTML = '';
+    const byProd = P.tree[ckAvl.value] || {};
+    Object.keys(byProd).forEach(pid => ckProd.appendChild(opt(pid, P.prods[pid] || ('#' + pid))));
+    fillWs();
+  }
+  function fillWs() {
+    ckWs.innerHTML = '';
+    const byProd = P.tree[ckAvl.value] || {};
+    (byProd[ckProd.value] || []).forEach(r => {
+      const n = CK_COUNTS[r.id] || 0;
+      const label = (r.cat ? r.cat + ': ' : '') + r.ws + ' [' + r.status + ']' +
+                    (showCounts && n ? '  (' + n + ' file' + (n > 1 ? 's' : '') + ')' : '');
+      ckWs.appendChild(opt(r.id, label));
+    });
+  }
+  function pick() {
+    const k = kindSel.value, on = (k === 'checklist');
+    if (grp) { grp.style.display = on ? '' : 'none'; }
+    if (ckWs) ckWs.disabled = !on;
+    plain.forEach(x => {
+      const el = f.querySelector('.ref_' + x);
+      if (!el) return;
+      const sel = (x === k);
+      el.disabled = !sel; el.style.display = sel ? '' : 'none';
+    });
+  }
+  if (ckAvl) {
+    ckAvl.addEventListener('change', fillProd);
+    ckProd.addEventListener('change', fillWs);
+    fillAvl();
+  }
+  kindSel.addEventListener('change', pick);
+  pick();
+});
 </script>
 {% endblock %}

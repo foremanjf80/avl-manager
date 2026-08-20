@@ -119,3 +119,74 @@ containing the attached files foldered by document category plus:
 Built packages are kept, so each one can be re-downloaded and its manifest read
 back as a record of what was sent when and by whom, even after the checklist moves
 on. Deleting a built package leaves the checklist and its files untouched.
+
+## v12 - call log entry
+The Log a call form is a real form now, not inputs injected by JavaScript, and
+calls can finally be edited and deleted rather than only appended.
+
+Attendees are picked, not typed: Qcells attendees come from the Team roster, TPO
+attendees from that AVL's contact list (the picker follows the AVL dropdown). A
+free-text "Other / guests" field per side keeps one-off attendees from being
+blocked. Attendees are stored structurally in call_attendees with the name kept
+alongside, so history survives a person or contact being removed; the existing
+name columns on calls are refreshed from it, leaving the CSV export and weekly
+digest unchanged.
+
+Topics covered and Outcomes / next steps are 5-row textareas that keep their line
+breaks in the list view. The log also gains a search across topics, outcomes,
+owner and attendees. Attendee strings entered before this change are matched back
+to the roster and contact list on first start.
+
+## v13 - navigation order + richer action items
+Contacts and Team move right in the nav, next to each other just before Files:
+Dashboard, Calls, Actions, Dataroom, Package, Workstreams, History, Exec,
+Contacts, Team, Files, Manage, Digest, Audit.
+
+Action items gain structure. "What needs to happen" stays free text (now a text
+area), but the owner is picked from the Team roster, with an "or someone not on
+the roster" field for externals; owners typed in before this are matched to the
+roster on first start. An action can be tied to a TPO AVL, a product, and a
+specific workstream requirement - picking a requirement sets the AVL and product
+from the checklist, and the row links straight back to it. Also adds priority,
+filters by open/all, AVL and owner, an overdue count, plus edit, reopen and delete
+(previously actions could only be added and marked done).
+
+## v14 - Team orgs
+Org on the Team roster is no longer Sales / Products-CE / Other. It offers the
+teams people actually get pulled from - Sales, Products / CE, RBO, Procurement /
+Sourcing, Product Management, Engineering / Technical, Quality, Operations,
+Supply Chain, Finance, Legal / Compliance, Marketing, IT, Executive - and "Other"
+now prompts for the team name rather than being a bucket. A team typed that way
+is offered to everyone afterwards, so the list grows with use.
+
+Org no longer restricts the Manage seat pickers, only orders them: the teams that
+usually fill a seat are listed first and everyone else under "Other teams" with
+their team shown. Pulling an RBO person into an Account Manager seat, or anyone
+into Product/Technical Rep, is never blocked - an org list cannot anticipate every
+real staffing arrangement.
+
+## v15 - download side of Files
+The Files page gains a Download card mirroring the uploader: the same four targets
+(workstream requirement, product, TPO AVL, call) plus two roll-ups - everything
+for a product across all AVLs, and everything for a TPO AVL across all products
+and calls. Each returns a ZIP foldered by product / document category, with
+level files under 00_product-level or 00_avl-level and calls under 01_calls, plus
+a MANIFEST.csv. Repeated filenames are de-duplicated rather than overwriting.
+Requirement options show their file count so you can see what you are about to
+fetch. Use /dataroom/package instead for a submission - that one lists gaps too.
+
+The workstream requirement picker only offers product x TPO pairings that have a
+seeded checklist, which is by design: a requirement does not exist until a
+template is applied. Both Files cards now say how many of the possible
+combinations have one and link to the Dataroom page to create more.
+
+## v16 - Prod/Tech rep picker excludes Sales
+Sales no longer appears in the Product/Technical rep picker at all, not even under
+"Other teams" - it is not a pairing that exists. A technical person sitting on
+another team gets that team on the roster and shows up under "Other teams"
+instead. The AVL seats are unchanged: Sales & account teams first, everyone else
+after, since a technical person covering an account is a real arrangement.
+
+If somebody from an excluded team already holds a seat, they are still listed
+under "Currently assigned" and stay selected, so opening and saving the form
+cannot silently drop them. Once removed they disappear from the picker for good.
