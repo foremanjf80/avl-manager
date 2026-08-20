@@ -1006,6 +1006,8 @@ def workstreams(request: Request, t: int = 0, user=Depends(require_user)):
         "SELECT DISTINCT doc_category FROM workstream_template_items "
         "WHERE doc_category<>'' ORDER BY doc_category")]
     # Where is this template already in play?
+    history = c.execute("SELECT * FROM template_revisions WHERE template_id=? "
+                        "ORDER BY id DESC LIMIT 15", (sel,)).fetchall() if cur else []
     usage = c.execute("SELECT p.name AS product, a.name AS avl_name, COUNT(*) AS n "
                       "FROM checklist_items ci JOIN products p ON p.id=ci.product_id "
                       "JOIN avls a ON a.id=ci.avl_id WHERE ci.template_id=? "
@@ -1013,7 +1015,7 @@ def workstreams(request: Request, t: int = 0, user=Depends(require_user)):
     c.close()
     return templates.TemplateResponse(request, "workstreams.html", {"user": user, "tmpls": tmpls,
         "cur": cur, "items": items, "avls": avls, "categories": db.CATEGORIES, "usage": usage,
-        "obligations": db.OBLIGATIONS, "doc_cats": doc_cats})
+        "obligations": db.OBLIGATIONS, "doc_cats": doc_cats, "history": history})
 
 @app.post("/workstreams/add")
 def ws_template_add(request: Request, name: str = Form(...), category: str = Form(""),
@@ -1056,6 +1058,7 @@ def ws_template_edit(tid: int, request: Request, name: str = Form(...), category
     if c.execute("SELECT 1 FROM workstream_templates WHERE name=? AND id<>?", (nm, tid)).fetchone():
         c.close()
         return RedirectResponse(f"/workstreams?t={tid}&err=dup", status_code=303)
+    db.record_revision(c, tid, "scope", f"renamed/rescoped to '{nm}'", user["email"])
     c.execute("UPDATE workstream_templates SET name=?, category=?, avl_id=?, notes=?, source_url=? "
               "WHERE id=?", (nm, category, aid, notes.strip(), source_url.strip(), tid))
     c.commit(); c.close()
@@ -1065,6 +1068,7 @@ def ws_template_edit(tid: int, request: Request, name: str = Form(...), category
 @app.post("/workstreams/{tid}/toggle")
 def ws_template_toggle(tid: int, request: Request, user=Depends(require_editor)):
     c = db.conn()
+    db.record_revision(c, tid, "retire/restore", "", user["email"])
     c.execute("UPDATE workstream_templates SET active = 1 - active WHERE id=?", (tid,))
     row = c.execute("SELECT name, active FROM workstream_templates WHERE id=?", (tid,)).fetchone()
     c.commit(); c.close()
@@ -1082,6 +1086,19 @@ def ws_template_delete(tid: int, request: Request, user=Depends(require_admin)):
         db.log(user["email"], "workstream:template:delete", row["name"])
     return RedirectResponse("/workstreams", status_code=303)
 
+@app.post("/workstreams/undo/{rev_id}")
+def ws_undo(rev_id: int, request: Request, user=Depends(require_editor)):
+    """Roll a template back to how it was before one recorded change."""
+    c = db.conn()
+    res = db.restore_revision(c, rev_id, user["email"])
+    if not res:
+        c.close()
+        return RedirectResponse("/workstreams?err=gone", status_code=303)
+    tid, action = res
+    c.commit(); c.close()
+    db.log(user["email"], "workstream:undo", f"t{tid}: reverted '{action}'")
+    return RedirectResponse(f"/workstreams?t={tid}&undone={action}", status_code=303)
+
 @app.post("/workstreams/{tid}/items/add")
 def ws_item_add(tid: int, request: Request, workstream: str = Form(...),
                 doc_category: str = Form(""), obligation: str = Form("Required"),
@@ -1093,6 +1110,7 @@ def ws_item_add(tid: int, request: Request, workstream: str = Form(...),
         c = db.conn()
         nxt = c.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM workstream_template_items "
                         "WHERE template_id=?", (tid,)).fetchone()[0]
+        db.record_revision(c, tid, "add requirement", ws, user["email"])
         c.execute("INSERT INTO workstream_template_items(template_id, doc_category, workstream, "
                   "obligation, description, sort_order) VALUES(?,?,?,?,?,?)",
                   (tid, doc_category.strip(), ws, obligation, description.strip(), nxt))
@@ -1108,11 +1126,17 @@ def ws_item_save(iid: int, request: Request, workstream: str = Form(...),
     if obligation not in db.OBLIGATIONS:
         obligation = "Required"
     c = db.conn()
+    row0 = c.execute("SELECT template_id, workstream FROM workstream_template_items WHERE id=?",
+                     (iid,)).fetchone()
+    if not row0:
+        c.close()
+        return RedirectResponse("/workstreams", status_code=303)
+    tid = row0["template_id"]
+    db.record_revision(c, tid, "edit requirement", row0["workstream"], user["email"])
     c.execute("UPDATE workstream_template_items SET doc_category=?, workstream=?, obligation=?, "
               "description=?, sort_order=? WHERE id=?",
               (doc_category.strip(), workstream.strip(), obligation, description.strip(),
                sort_order, iid))
-    tid = c.execute("SELECT template_id FROM workstream_template_items WHERE id=?", (iid,)).fetchone()["template_id"]
     c.commit(); c.close()
     db.log(user["email"], "workstream:item:save", workstream.strip())
     return RedirectResponse(f"/workstreams?t={tid}", status_code=303)
@@ -1124,6 +1148,7 @@ def ws_item_delete(iid: int, request: Request, user=Depends(require_editor)):
     if not row:
         c.close()
         return RedirectResponse("/workstreams", status_code=303)
+    db.record_revision(c, row["template_id"], "delete requirement", row["workstream"], user["email"])
     c.execute("DELETE FROM workstream_template_items WHERE id=?", (iid,))
     c.commit(); c.close()
     db.log(user["email"], "workstream:item:delete", row["workstream"])
@@ -1179,7 +1204,7 @@ def backup(request: Request, user=Depends(require_admin)):
     return FileResponse(dest, filename=f"avl_backup_{stamp}.db")
 
 # ---------------- 9) attachments ----------------
-ATT_KINDS = ("product", "avl", "call", "checklist")
+ATT_KINDS = ("product", "avl", "call", "checklist", "ie_item")
 
 def _checklist_targets(c):
     """Every product x AVL x workstream row a file can be filed against."""
@@ -1190,13 +1215,39 @@ def _checklist_targets(c):
         "JOIN avls a ON a.id=ci.avl_id "
         "ORDER BY a.name, p.name, ci.sort_order, ci.id").fetchall()
 
+def _ie_targets(c):
+    """Every IE report item a file can be filed against, plus a picker tree."""
+    rows = c.execute(
+        "SELECT i.id, i.item_id, i.sub_section, i.review_item, i.status, i.section_id, "
+        "s.title AS section, s.sort_order AS s_ord, r.id AS report_id, r.name AS report, "
+        "r.reviewer, p.name AS product "
+        "FROM ie_report_items i JOIN ie_report_sections s ON s.id=i.section_id "
+        "JOIN ie_reports r ON r.id=i.report_id JOIN products p ON p.id=r.product_id "
+        "WHERE r.active=1 ORDER BY r.id, s.sort_order, i.sort_order, i.id").fetchall()
+    tree, reports, sections = {}, [], {}
+    for r in rows:
+        rk, sk = str(r["report_id"]), str(r["section_id"])
+        if rk not in tree:
+            tree[rk] = {}
+            reports.append([r["report_id"], f"{r['product']} - {r['reviewer']}"])
+        if sk not in tree[rk]:
+            tree[rk][sk] = {"name": r["section"], "items": []}
+            sections[sk] = r["section"]
+        tree[rk][sk]["items"].append(
+            {"id": r["id"], "label": f"{r['item_id']} {r['sub_section']}".strip(),
+             "status": r["status"]})
+    return rows, {"tree": tree, "reports": reports}
+
 def _files_context(c):
     products = c.execute("SELECT id, name FROM products ORDER BY name").fetchall()
     avls = c.execute("SELECT id, name FROM avls ORDER BY name").fetchall()
     calls_ = c.execute("SELECT calls.id, call_date, a.name AS avl_name FROM calls "
                        "JOIN avls a ON a.id=calls.avl_id ORDER BY call_date DESC LIMIT 100").fetchall()
     checks = _checklist_targets(c)
-    names = {"product": {p["id"]: p["name"] for p in products},
+    ie_rows, ie_picker = _ie_targets(c)
+    names = {"ie_item": {r["id"]: f"{r['product']} / {r['reviewer']} - {r['section']} / "
+                                  f"{r['item_id']} {r['sub_section']}".strip() for r in ie_rows},
+             "product": {p["id"]: p["name"] for p in products},
              "avl": {a["id"]: a["name"] for a in avls},
              "call": {r["id"]: f"{r['avl_name']} {r['call_date']}" for r in calls_},
              "checklist": {r["id"]: f"{r['avl_name']} / {r['product']} - "
@@ -1211,12 +1262,12 @@ def _files_context(c):
     picker = {"tree": tree,
               "avls": [[a["id"], a["name"]] for a in avls if str(a["id"]) in tree],
               "prods": {str(p["id"]): p["name"] for p in products}}
-    return products, avls, calls_, checks, names, picker
+    return products, avls, calls_, checks, names, picker, ie_rows, ie_picker
 
 @app.get("/files", response_class=HTMLResponse)
 def files(request: Request, kind: str = "", ref: int = 0, user=Depends(require_user)):
     c = db.conn()
-    products, avls, calls_, checks, names, picker = _files_context(c)
+    products, avls, calls_, checks, names, picker, ie_rows, ie_picker = _files_context(c)
     q = "SELECT * FROM attachments"
     params = []
     if kind in ATT_KINDS:
@@ -1239,6 +1290,7 @@ def files(request: Request, kind: str = "", ref: int = 0, user=Depends(require_u
     return templates.TemplateResponse(request, "files.html", {"user": user, "products": products,
         "avls": avls, "calls": calls_, "checks": checks, "atts": atts, "names": names,
         "picker": picker, "f_kind": kind, "f_ref": ref, "bundle_kinds": BUNDLE_KINDS,
+        "ie_rows": ie_rows, "ie_picker": ie_picker, "ie_bundle_kinds": IE_BUNDLE_KINDS,
         "counts": counts, "n_checklists": n_checklists, "n_combos": n_combos})
 
 @app.post("/files/upload")
@@ -1312,6 +1364,11 @@ BUNDLE_KINDS = {
     "product_all": "Everything for a product (all AVLs)",
     "avl_all": "Everything for a TPO AVL (all products + calls)",
 }
+IE_BUNDLE_KINDS = {
+    "ie_item": "One IE review item",
+    "ie_section": "One IE report section",
+    "ie_report": "Whole IE report (evidence pack)",
+}
 
 def _bundle_files(c, kind, ref_id):
     """(label, [(folder, attachment_row)]) for a download bundle."""
@@ -1345,8 +1402,42 @@ def _bundle_files(c, kind, ref_id):
                          (ref_id,)).fetchall()
         return f"{row['avl_name']} {row['product']} - {row['workstream']}", [("", a) for a in atts]
 
-    # Roll-ups: everything filed anywhere under one product or one AVL.
+    if kind == "ie_item":
+        row = c.execute("SELECT i.item_id, i.sub_section, s.title AS section, p.name AS product "
+                        "FROM ie_report_items i JOIN ie_report_sections s ON s.id=i.section_id "
+                        "JOIN ie_reports r ON r.id=i.report_id JOIN products p ON p.id=r.product_id "
+                        "WHERE i.id=?", (ref_id,)).fetchone()
+        if not row:
+            return None, []
+        atts = c.execute("SELECT * FROM attachments WHERE kind='ie_item' AND ref_id=? ORDER BY id",
+                         (ref_id,)).fetchall()
+        return f"{row['product']} {row['section']} {row['item_id']}", [("", a) for a in atts]
+
     out = []
+    if kind in ("ie_section", "ie_report"):
+        if kind == "ie_section":
+            head = c.execute("SELECT s.title AS n, p.name AS product FROM ie_report_sections s "
+                             "JOIN ie_reports r ON r.id=s.report_id JOIN products p ON p.id=r.product_id "
+                             "WHERE s.id=?", (ref_id,)).fetchone()
+            where, args = "s.id=?", (ref_id,)
+        else:
+            head = c.execute("SELECT r.name AS n, p.name AS product FROM ie_reports r "
+                             "JOIN products p ON p.id=r.product_id WHERE r.id=?", (ref_id,)).fetchone()
+            where, args = "r.id=?", (ref_id,)
+        if not head:
+            return None, []
+        for r in c.execute(
+                "SELECT att.*, s.title AS section, s.sort_order AS s_ord, i.item_id, i.sub_section "
+                "FROM attachments att JOIN ie_report_items i ON i.id=att.ref_id "
+                "JOIN ie_report_sections s ON s.id=i.section_id "
+                "JOIN ie_reports r ON r.id=i.report_id "
+                f"WHERE att.kind='ie_item' AND {where} ORDER BY s.sort_order, i.sort_order", args):
+            folder = (f"{r['s_ord']+1:02d}_{r['section']}/{r['item_id']} {r['sub_section']}".strip()
+                      if kind == "ie_report" else f"{r['item_id']} {r['sub_section']}".strip())
+            out.append((folder, r))
+        return head["n"], out
+
+    # Roll-ups: everything filed anywhere under one product or one AVL.
     if kind == "product_all":
         row = c.execute("SELECT name FROM products WHERE id=?", (ref_id,)).fetchone()
         if not row:
@@ -1386,7 +1477,7 @@ def _bundle_files(c, kind, ref_id):
 @app.get("/files/bundle.zip")
 def files_bundle(request: Request, kind: str = "", ref_id: int = 0, user=Depends(require_user)):
     """Download side of the uploader: the same targets, zipped with a manifest."""
-    if kind not in BUNDLE_KINDS or not ref_id:
+    if (kind not in BUNDLE_KINDS and kind not in IE_BUNDLE_KINDS) or not ref_id:
         return RedirectResponse("/files?err=badtarget", status_code=303)
     c = db.conn()
     label, items = _bundle_files(c, kind, ref_id)
@@ -1425,8 +1516,9 @@ def files_bundle(request: Request, kind: str = "", ref_id: int = 0, user=Depends
             w.writerow(r)
         z.writestr("MANIFEST.csv", buf.getvalue())
 
+    kind_label = {**BUNDLE_KINDS, **IE_BUNDLE_KINDS}[kind]
     db.log(user["email"], "files:bundle",
-           f"{BUNDLE_KINDS[kind]} '{label}' - {len(items) - missing} file(s)")
+           f"{kind_label} '{label}' - {len(items) - missing} file(s)")
     return FileResponse(path, filename=base + ".zip", media_type="application/zip")
 
 @app.get("/files/{att_id}/download")
@@ -1590,6 +1682,28 @@ def _package_contents(c, product_id, avl_id, scope):
         seen[key]["items"].append({"row": r, "files": files, "gap": not files})
     return groups
 
+def _dominant_template(c, product_id, avl_id):
+    row = c.execute("SELECT template_id, COUNT(*) n FROM checklist_items "
+                    "WHERE product_id=? AND avl_id=? AND template_id IS NOT NULL "
+                    "GROUP BY template_id ORDER BY n DESC LIMIT 1", (product_id, avl_id)).fetchone()
+    return row["template_id"] if row else None
+
+def _template_drift(c, product_id, avl_id, template_id):
+    """Template requirements that never made it onto this checklist.
+
+    Seeding is a point-in-time copy, so a template edited afterwards leaves the
+    checklist behind. Those are gaps too, and worth naming in a submission.
+    """
+    if not template_id:
+        return []
+    have = {r["workstream"] for r in c.execute(
+        "SELECT workstream FROM checklist_items WHERE product_id=? AND avl_id=?",
+        (product_id, avl_id))}
+    return [r for r in c.execute(
+        "SELECT doc_category, workstream, obligation, description "
+        "FROM workstream_template_items WHERE template_id=? ORDER BY sort_order, id",
+        (template_id,)) if r["workstream"] not in have]
+
 def _package_stats(groups):
     n_reqs = sum(len(g["items"]) for g in groups)
     n_files = sum(len(i["files"]) for g in groups for i in g["items"])
@@ -1600,7 +1714,7 @@ def _package_stats(groups):
 
 @app.get("/dataroom/package", response_class=HTMLResponse)
 def package_preview(request: Request, product: int = 0, avl: int = 0, scope: str = "all",
-                    user=Depends(require_user)):
+                    template: int = 0, user=Depends(require_user)):
     if scope not in db.PACKAGE_SCOPES:
         scope = "all"
     c = db.conn()
@@ -1611,91 +1725,170 @@ def package_preview(request: Request, product: int = 0, avl: int = 0, scope: str
     avl = avl or (avls[0]["id"] if avls else 0)
     groups = _package_contents(c, product, avl, scope)
     stats = _package_stats(groups)
+    tmpl_id = template or _dominant_template(c, product, avl)
+    drift = _template_drift(c, product, avl, tmpl_id)
+    tmpl = c.execute("SELECT id, name FROM workstream_templates WHERE id=?", (tmpl_id,)).fetchone() \
+           if tmpl_id else None
+    all_tmpls = db.templates_for(c, "", avl) or c.execute(
+        "SELECT id, name, category FROM workstream_templates WHERE active=1 ORDER BY name").fetchall()
     prior = c.execute("SELECT * FROM packages WHERE product_id=? AND avl_id=? "
                       "ORDER BY id DESC LIMIT 20", (product, avl)).fetchall()
+    next_rev = (c.execute("SELECT COALESCE(MAX(revision), 0) + 1 AS n FROM packages "
+                          "WHERE product_id=? AND avl_id=?", (product, avl)).fetchone()["n"])
     pname = c.execute("SELECT name FROM products WHERE id=?", (product,)).fetchone()
     aname = c.execute("SELECT name FROM avls WHERE id=?", (avl,)).fetchone()
     c.close()
     return templates.TemplateResponse(request, "package.html", {"user": user, "products": products,
         "avls": avls, "sel_p": product, "sel_a": avl, "scope": scope, "scopes": db.PACKAGE_SCOPES,
-        "groups": groups, "stats": stats, "prior": prior,
+        "groups": groups, "stats": stats, "prior": prior, "drift": drift, "tmpl": tmpl,
+        "all_tmpls": all_tmpls, "next_rev": next_rev, "today": datetime.date.today().isoformat(),
         "product_name": pname["name"] if pname else "", "avl_name": aname["name"] if aname else ""})
 
 @app.post("/dataroom/package/build")
 def package_build(request: Request, product_id: int = Form(...), avl_id: int = Form(...),
-                  scope: str = Form("all"), label: str = Form(""), user=Depends(require_editor)):
-    """Zip the attached files, with a manifest that also names every gap."""
+                  scope: str = Form("all"), label: str = Form(""), template_id: str = Form(""),
+                  rev_date: str = Form(""), user=Depends(require_editor)):
+    """Zip the attached files with a manifest and a dataroom summary.
+
+    The summary compares the checklist against the template it was seeded from,
+    so it names three things: what is included, what is on the checklist with no
+    document, and what the template asks for that the checklist never picked up.
+    """
     if scope not in db.PACKAGE_SCOPES:
         scope = "all"
     c = db.conn()
     groups = _package_contents(c, product_id, avl_id, scope)
     stats = _package_stats(groups)
+    tid = int(template_id) if str(template_id).strip().isdigit() and int(template_id) > 0 \
+          else _dominant_template(c, product_id, avl_id)
+    drift = _template_drift(c, product_id, avl_id, tid)
+    trow = c.execute("SELECT name FROM workstream_templates WHERE id=?", (tid,)).fetchone() if tid else None
+    tname = trow["name"] if trow else "(no template recorded)"
     pname = c.execute("SELECT name FROM products WHERE id=?", (product_id,)).fetchone()["name"]
     aname = c.execute("SELECT name FROM avls WHERE id=?", (avl_id,)).fetchone()["name"]
-    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    base = f"{_safe(aname, 40)}_{_safe(pname, 40)}_{stamp}"
-    stored = os.path.join(PKG_DIR, base + ".zip")
 
-    manifest_rows, missing_paths = [], []
+    rev = c.execute("SELECT COALESCE(MAX(revision), 0) + 1 AS n FROM packages "
+                    "WHERE product_id=? AND avl_id=?", (product_id, avl_id)).fetchone()["n"]
+    rdate = rev_date.strip() or datetime.date.today().isoformat()
+    rev_code = f"R{rev:02d}"
+    stamp = rdate.replace("-", "")
+    base = f"{_safe(aname, 30)}_{_safe(pname, 30)}_{rev_code}_{stamp}"
+    stored = os.path.join(PKG_DIR, base + ".zip")
+    full_code = f"{aname} / {pname} / {rev_code} / {rdate}"
+
+    manifest_rows, summary_rows, missing_paths = [], [], []
     with zipfile.ZipFile(stored, "w", zipfile.ZIP_DEFLATED) as z:
         for gi, g in enumerate(groups, 1):
             folder = f"{gi:02d}_{_safe(g['name'], 50)}"
             for item in g["items"]:
                 r = item["row"]
                 if item["gap"]:
+                    summary_rows.append([g["name"], r["workstream"], r["obligation"], r["status"],
+                                         0, "NO DOCUMENT"])
                     manifest_rows.append([g["name"], r["workstream"], r["obligation"],
                                           r["status"], "", "MISSING - no file attached"])
                     continue
                 sub = f"{folder}/{_safe(r['workstream'], 60)}"
+                got = 0
                 for f in item["files"]:
                     arc = f"{sub}/{_safe(f['filename'], 90)}"
                     if os.path.exists(f["stored_path"]):
                         z.write(f["stored_path"], arc)
+                        got += 1
                         manifest_rows.append([g["name"], r["workstream"], r["obligation"],
                                               r["status"], arc, ""])
                     else:
                         missing_paths.append(f["filename"])
                         manifest_rows.append([g["name"], r["workstream"], r["obligation"],
                                               r["status"], "", "FILE NOT FOUND ON DISK"])
+                summary_rows.append([g["name"], r["workstream"], r["obligation"], r["status"],
+                                     got, "INCLUDED" if got else "NO DOCUMENT"])
+        for d in drift:
+            summary_rows.append([d["doc_category"], d["workstream"], d["obligation"],
+                                 "-", 0, "NOT ON CHECKLIST"])
 
-        buf = io.StringIO()
-        w = csv.writer(buf)
-        w.writerow(["Document Category", "Required Document", "Obligation", "Status",
-                    "File in package", "Gap"])
-        for row in manifest_rows:
-            w.writerow(row)
-        z.writestr("MANIFEST.csv", buf.getvalue())
+        def csv_bytes(header, rows):
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            w.writerow(header)
+            for row in rows:
+                w.writerow(row)
+            return buf.getvalue()
 
-        lines = [f"Dataroom package - {pname} @ {aname}",
-                 f"Built {now()} by {user['email']}",
-                 f"Scope: {db.PACKAGE_SCOPES[scope]}" + (f"   Label: {label.strip()}" if label.strip() else ""),
-                 "",
-                 f"{stats['n_reqs']} requirements in scope, {stats['n_files']} files included, "
-                 f"{stats['n_gaps']} with no file ({stats['blocking']} of those Required).",
-                 ""]
+        z.writestr("MANIFEST.csv", csv_bytes(
+            ["Document Category", "Required Document", "Obligation", "Status",
+             "File in package", "Gap"], manifest_rows))
+        z.writestr("SUMMARY.csv", csv_bytes(
+            ["Document Category", "Required Document", "Obligation", "Checklist status",
+             "Files included", "Result"], summary_rows))
+
+        # readable summary
+        by_cat = {}
+        for cat, req, obl, st_, n, res in summary_rows:
+            d = by_cat.setdefault(cat or "Other", {"n": 0, "inc": 0, "nodoc": 0, "untracked": 0, "files": 0})
+            d["n"] += 1
+            d["files"] += n
+            d["inc"] += res == "INCLUDED"
+            d["nodoc"] += res == "NO DOCUMENT"
+            d["untracked"] += res == "NOT ON CHECKLIST"
+        L = [f"DATAROOM SUBMISSION SUMMARY",
+             f"{'=' * 60}",
+             f"TPO AVL          : {aname}",
+             f"Product          : {pname}",
+             f"Revision         : {rev_code}",
+             f"Revision date    : {rdate}",
+             f"Built            : {now()} by {user['email']}",
+             f"Scope            : {db.PACKAGE_SCOPES[scope]}",
+             f"Compared against : {tname}"]
+        if label.strip():
+            L.append(f"Label            : {label.strip()}")
+        L += ["",
+              f"{stats['n_files']} document(s) included against {stats['n_reqs']} requirement(s) in scope.",
+              f"{stats['n_gaps']} requirement(s) have no document ({stats['blocking']} of them Required).",
+              f"{len(drift)} template requirement(s) are not on this checklist yet.", "",
+              "BY DOCUMENT CATEGORY", "-" * 60,
+              f"{'Category':<38}{'Reqs':>5}{'Incl':>6}{'NoDoc':>7}{'NotTrk':>7}"]
+        for cat, d in by_cat.items():
+            L.append(f"{cat[:37]:<38}{d['n']:>5}{d['inc']:>6}{d['nodoc']:>7}{d['untracked']:>7}")
+        tot = {k: sum(d[k] for d in by_cat.values()) for k in ("n", "inc", "nodoc", "untracked")}
+        L += [f"{'TOTAL':<38}{tot['n']:>5}{tot['inc']:>6}{tot['nodoc']:>7}{tot['untracked']:>7}", ""]
+
+        L += ["CONTENTS", "-" * 60]
         for gi, g in enumerate(groups, 1):
             got = sum(len(i["files"]) for i in g["items"])
-            lines.append(f"{gi:02d}. {g['name']}  -  {got} file(s)")
+            L.append(f"{gi:02d}. {g['name']}  -  {got} file(s)")
             for item in g["items"]:
                 r = item["row"]
-                mark = "  [ ] MISSING" if item["gap"] else "  [x]"
-                lines.append(f"    {mark} ({r['obligation']}, {r['status']}) {r['workstream']}")
+                mark = "  [ ] NO DOCUMENT" if item["gap"] else "  [x]"
+                L.append(f"    {mark} ({r['obligation']}, {r['status']}) {r['workstream']}")
                 for f in item["files"]:
-                    lines.append(f"          - {f['filename']}")
-            lines.append("")
+                    L.append(f"          - {f['filename']}")
+            L.append("")
+        if drift:
+            L += ["NOT ON THIS CHECKLIST", "-" * 60,
+                  f"In '{tname}' but never seeded here. Re-apply the template on the Dataroom",
+                  "page (Merge) to start tracking them.", ""]
+            for d in drift:
+                L.append(f"    [ ] ({d['obligation']}) {d['doc_category']}: {d['workstream']}")
+            L.append("")
         if missing_paths:
-            lines += ["WARNING - these attachments are recorded but their file was not on disk:",
-                      *[f"  - {m}" for m in missing_paths], ""]
-        z.writestr("CONTENTS.txt", "\n".join(lines))
+            L += ["WARNING - recorded attachments whose file was not on disk:",
+                  *[f"  - {m}" for m in missing_paths], ""]
+        z.writestr("DATAROOM_SUMMARY.txt", "\n".join(L))
 
     size = os.path.getsize(stored)
     c.execute("INSERT INTO packages(product_id, avl_id, label, scope, n_files, n_reqs, n_gaps, "
-              "bytes, stored_path, manifest, created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+              "n_untracked, bytes, stored_path, manifest, revision, rev_code, rev_date, "
+              "template_id, created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
               (product_id, avl_id, label.strip(), scope, stats["n_files"], stats["n_reqs"],
-               stats["n_gaps"], size, stored, json.dumps(manifest_rows), user["email"], now()))
+               stats["n_gaps"], len(drift), size, stored, json.dumps(manifest_rows), rev,
+               rev_code, rdate, tid, user["email"], now()))
+    c.execute("UPDATE packages SET superseded=1 WHERE product_id=? AND avl_id=? AND revision<?",
+              (product_id, avl_id, rev))
     c.commit(); c.close()
     db.log(user["email"], "package:build",
-           f"{pname} @ {aname} [{scope}] {stats['n_files']} files, {stats['n_gaps']} gaps")
+           f"{full_code} [{scope}] {stats['n_files']} files, {stats['n_gaps']} gaps, "
+           f"{len(drift)} untracked")
     return FileResponse(stored, filename=base + ".zip", media_type="application/zip")
 
 @app.get("/dataroom/package/{pkg_id}/download")
@@ -1736,3 +1929,517 @@ def package_delete(pkg_id: int, request: Request, user=Depends(require_editor)):
     c.close()
     return RedirectResponse(f"/dataroom/package?product={row['product_id']}&avl={row['avl_id']}"
                             if row else "/dataroom/package", status_code=303)
+
+# ---------------- 12) IE / DNV technology reviews ----------------
+# Kept separate from the AVL workstream templates on purpose: an IE review is a
+# document a third party writes about a product, not a per-TPO dataroom checklist.
+IE_KIND = "ie_item"
+
+def _ie_progress(c, report_id):
+    """Per-section rollup plus totals for one report."""
+    secs = c.execute("SELECT * FROM ie_report_sections WHERE report_id=? ORDER BY sort_order, id",
+                     (report_id,)).fetchall()
+    items = c.execute("SELECT * FROM ie_report_items WHERE report_id=? ORDER BY sort_order, id",
+                      (report_id,)).fetchall()
+    atts = {}
+    if items:
+        qs = ",".join("?" * len(items))
+        for a in c.execute(f"SELECT * FROM attachments WHERE kind='{IE_KIND}' AND ref_id IN ({qs}) "
+                           "ORDER BY id DESC", [i["id"] for i in items]):
+            atts.setdefault(a["ref_id"], []).append(a)
+    groups, by_sec = [], {}
+    for s in secs:
+        by_sec[s["id"]] = {"sec": s, "items": [], "n": 0, "done": 0, "wip": 0,
+                           "blocked": 0, "open": 0, "files": 0, "crit_open": 0}
+        groups.append(by_sec[s["id"]])
+    for i in items:
+        g = by_sec.get(i["section_id"])
+        if not g:
+            continue
+        g["items"].append(i)
+        g["n"] += 1
+        g["files"] += len(atts.get(i["id"], []))
+        st = i["status"]
+        if st in ("Accepted", "N/A"):
+            g["done"] += 1
+        elif st == "Blocked":
+            g["blocked"] += 1
+        elif st in ("In Progress", "Submitted"):
+            g["wip"] += 1
+        else:
+            g["open"] += 1
+        if i["priority"] == "Critical" and st not in ("Accepted", "N/A"):
+            g["crit_open"] += 1
+    for g in groups:
+        g["pct"] = round(100 * g["done"] / g["n"]) if g["n"] else 0
+    totals = {k: sum(g[k] for g in groups) for k in
+              ("n", "done", "wip", "blocked", "open", "files", "crit_open")}
+    totals["pct"] = round(100 * totals["done"] / totals["n"]) if totals["n"] else 0
+    return groups, totals, atts
+
+@app.get("/ie", response_class=HTMLResponse)
+def ie_home(request: Request, user=Depends(require_user)):
+    c = db.conn()
+    reports = c.execute(
+        "SELECT r.*, p.name AS product, p.category, "
+        "(SELECT COUNT(*) FROM ie_report_items i WHERE i.report_id=r.id) AS n_items, "
+        "(SELECT COUNT(*) FROM ie_report_items i WHERE i.report_id=r.id "
+        " AND i.status IN ('Accepted','N/A')) AS n_done "
+        "FROM ie_reports r JOIN products p ON p.id=r.product_id "
+        "WHERE r.active=1 ORDER BY r.id DESC").fetchall()
+    tmpls = c.execute("SELECT t.*, "
+                      "(SELECT COUNT(*) FROM ie_template_sections s WHERE s.template_id=t.id) AS n_sec, "
+                      "(SELECT COUNT(*) FROM ie_template_items i JOIN ie_template_sections s "
+                      " ON s.id=i.section_id WHERE s.template_id=t.id) AS n_items "
+                      "FROM ie_templates t WHERE t.active=1 ORDER BY t.name").fetchall()
+    products = c.execute("SELECT id, name, category FROM products WHERE active=1 "
+                         "ORDER BY category, name").fetchall()
+    c.close()
+    return templates.TemplateResponse(request, "ie.html", {"user": user, "reports": reports,
+        "tmpls": tmpls, "products": products, "reviewers": db.IE_REVIEWERS,
+        "statuses": db.IE_REPORT_STATUSES})
+
+@app.post("/ie/reports/add")
+def ie_report_add(request: Request, product_id: int = Form(...), template_id: int = Form(...),
+                  name: str = Form(""), reviewer: str = Form("DNV"),
+                  kickoff_date: str = Form(""), target_date: str = Form(""),
+                  user=Depends(require_editor)):
+    c = db.conn()
+    t = c.execute("SELECT * FROM ie_templates WHERE id=?", (template_id,)).fetchone()
+    p = c.execute("SELECT name FROM products WHERE id=?", (product_id,)).fetchone()
+    if not t or not p:
+        c.close()
+        return RedirectResponse("/ie?err=bad", status_code=303)
+    rname = name.strip() or f"{p['name']} - {reviewer} Technology Review"
+    c.execute("INSERT INTO ie_reports(product_id, template_id, name, reviewer, kickoff_date, "
+              "target_date, created_by, created_at) VALUES(?,?,?,?,?,?,?,?)",
+              (product_id, template_id, rname, reviewer, kickoff_date, target_date,
+               user["email"], now()))
+    rid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+    for s in c.execute("SELECT * FROM ie_template_sections WHERE template_id=? "
+                       "ORDER BY sort_order, id", (template_id,)).fetchall():
+        c.execute("INSERT INTO ie_report_sections(report_id, code, title, owner, sort_order) "
+                  "VALUES(?,?,?,?,?)", (rid, s["code"], s["title"], s["owner"], s["sort_order"]))
+        sid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        for i in c.execute("SELECT * FROM ie_template_items WHERE section_id=? "
+                           "ORDER BY sort_order, id", (s["id"],)).fetchall():
+            c.execute("INSERT INTO ie_report_items(report_id, section_id, item_id, sub_section, "
+                      "review_item, evidence, priority, source, owner, sort_order, "
+                      "updated_by, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (rid, sid, i["item_id"], i["sub_section"], i["review_item"], i["evidence"],
+                       i["priority"], i["source"], i["suggested_owner"], i["sort_order"],
+                       user["email"], now()))
+    c.commit(); c.close()
+    db.log(user["email"], "ie:report:add", f"{rname} from '{t['name']}'")
+    return RedirectResponse(f"/ie/report/{rid}", status_code=303)
+
+@app.get("/ie/report/{rid}", response_class=HTMLResponse)
+def ie_report(request: Request, rid: int, only: str = "", user=Depends(require_user)):
+    c = db.conn()
+    r = c.execute("SELECT r.*, p.name AS product, p.category FROM ie_reports r "
+                  "JOIN products p ON p.id=r.product_id WHERE r.id=?", (rid,)).fetchone()
+    if not r:
+        c.close()
+        return RedirectResponse("/ie", status_code=303)
+    groups, totals, atts = _ie_progress(c, rid)
+    if only:
+        for g in groups:
+            if only == "open":
+                g["items"] = [i for i in g["items"] if i["status"] not in ("Accepted", "N/A")]
+            elif only == "critical":
+                g["items"] = [i for i in g["items"] if i["priority"] == "Critical"]
+            elif only == "blocked":
+                g["items"] = [i for i in g["items"] if i["status"] == "Blocked"]
+            elif only == "nofile":
+                g["items"] = [i for i in g["items"] if not atts.get(i["id"])]
+    people = c.execute("SELECT id, name, org FROM people WHERE active=1 ORDER BY name").fetchall()
+    avls = c.execute("SELECT id, name FROM avls WHERE active=1 ORDER BY name").fetchall()
+    c.close()
+    return templates.TemplateResponse(request, "ie_report.html", {"user": user, "r": r,
+        "groups": groups, "totals": totals, "atts": atts, "people": people, "avls": avls,
+        "item_statuses": db.IE_ITEM_STATUSES, "priorities": db.IE_PRIORITIES,
+        "report_statuses": db.IE_REPORT_STATUSES, "reviewers": db.IE_REVIEWERS, "only": only})
+
+@app.post("/ie/report/{rid}/save")
+def ie_report_save(rid: int, request: Request, name: str = Form(...), reviewer: str = Form("DNV"),
+                   status: str = Form("Planning"), kickoff_date: str = Form(""),
+                   target_date: str = Form(""), shared_with: str = Form(""),
+                   notes: str = Form(""), user=Depends(require_editor)):
+    c = db.conn()
+    c.execute("UPDATE ie_reports SET name=?, reviewer=?, status=?, kickoff_date=?, target_date=?, "
+              "shared_with=?, notes=? WHERE id=?",
+              (name.strip(), reviewer, status, kickoff_date, target_date,
+               shared_with.strip(), notes.strip(), rid))
+    c.commit(); c.close()
+    db.log(user["email"], "ie:report:save", f"{name.strip()} -> {status}")
+    return RedirectResponse(f"/ie/report/{rid}", status_code=303)
+
+@app.post("/ie/report/{rid}/delete")
+def ie_report_delete(rid: int, request: Request, user=Depends(require_admin)):
+    c = db.conn()
+    row = c.execute("SELECT name FROM ie_reports WHERE id=?", (rid,)).fetchone()
+    c.execute("UPDATE ie_reports SET active=0 WHERE id=?", (rid,))
+    c.commit(); c.close()
+    if row:
+        db.log(user["email"], "ie:report:delete", row["name"])
+    return RedirectResponse("/ie", status_code=303)
+
+@app.post("/ie/item/{iid}/save")
+def ie_item_save(iid: int, request: Request, status: str = Form(...),
+                 owner_person_id: str = Form(""), owner_other: str = Form(""),
+                 due_date: str = Form(""), priority: str = Form("Normal"),
+                 gap: str = Form(""), notes: str = Form(""), user=Depends(require_editor)):
+    if status not in db.IE_ITEM_STATUSES:
+        status = "Not Started"
+    if priority not in db.IE_PRIORITIES:
+        priority = "Normal"
+    c = db.conn()
+    row = c.execute("SELECT report_id, review_item, owner FROM ie_report_items WHERE id=?",
+                    (iid,)).fetchone()
+    if not row:
+        c.close()
+        return RedirectResponse("/ie", status_code=303)
+    oid = int(owner_person_id) if owner_person_id.strip().isdigit() and int(owner_person_id) > 0 else None
+    oname = ""
+    if oid:
+        p = c.execute("SELECT name FROM people WHERE id=? AND active=1", (oid,)).fetchone()
+        oname, oid = (p["name"], oid) if p else ("", None)
+    owner_txt = oname or owner_other.strip() or (row["owner"] if not oid else "")
+    c.execute("UPDATE ie_report_items SET status=?, owner=?, owner_person_id=?, due_date=?, "
+              "priority=?, gap=?, notes=?, updated_by=?, updated_at=? WHERE id=?",
+              (status, owner_txt, oid, due_date, priority, gap.strip(), notes.strip(),
+               user["email"], now(), iid))
+    c.commit(); c.close()
+    db.log(user["email"], "ie:item", f"{row['review_item'][:60]} -> {status}")
+    return RedirectResponse(f"/ie/report/{row['report_id']}", status_code=303)
+
+@app.post("/ie/report/{rid}/section/{sid}/save")
+def ie_section_save(rid: int, sid: int, request: Request, owner_person_id: str = Form(""),
+                    owner_other: str = Form(""), user=Depends(require_editor)):
+    c = db.conn()
+    oid = int(owner_person_id) if owner_person_id.strip().isdigit() and int(owner_person_id) > 0 else None
+    oname = ""
+    if oid:
+        p = c.execute("SELECT name FROM people WHERE id=? AND active=1", (oid,)).fetchone()
+        oname, oid = (p["name"], oid) if p else ("", None)
+    c.execute("UPDATE ie_report_sections SET owner=?, owner_person_id=? WHERE id=? AND report_id=?",
+              (oname or owner_other.strip(), oid, sid, rid))
+    c.commit(); c.close()
+    return RedirectResponse(f"/ie/report/{rid}", status_code=303)
+
+@app.post("/ie/report/{rid}/item/add")
+def ie_item_add(rid: int, request: Request, section_id: int = Form(...),
+                review_item: str = Form(...), sub_section: str = Form(""),
+                item_id: str = Form(""), evidence: str = Form(""),
+                priority: str = Form("Normal"), user=Depends(require_editor)):
+    ri = review_item.strip()
+    if priority not in db.IE_PRIORITIES:
+        priority = "Normal"
+    if ri:
+        c = db.conn()
+        nxt = c.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM ie_report_items "
+                        "WHERE report_id=? AND section_id=?", (rid, section_id)).fetchone()[0]
+        c.execute("INSERT INTO ie_report_items(report_id, section_id, item_id, sub_section, "
+                  "review_item, evidence, priority, sort_order, updated_by, updated_at) "
+                  "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                  (rid, section_id, item_id.strip(), sub_section.strip(), ri, evidence.strip(),
+                   priority, nxt, user["email"], now()))
+        c.commit(); c.close()
+        db.log(user["email"], "ie:item:add", ri[:60])
+    return RedirectResponse(f"/ie/report/{rid}", status_code=303)
+
+@app.post("/ie/item/{iid}/delete")
+def ie_item_delete(iid: int, request: Request, user=Depends(require_editor)):
+    c = db.conn()
+    row = c.execute("SELECT report_id, review_item FROM ie_report_items WHERE id=?", (iid,)).fetchone()
+    if not row:
+        c.close()
+        return RedirectResponse("/ie", status_code=303)
+    n = c.execute(f"SELECT COUNT(*) FROM attachments WHERE kind='{IE_KIND}' AND ref_id=?",
+                  (iid,)).fetchone()[0]
+    if n:
+        c.close()
+        return RedirectResponse(f"/ie/report/{row['report_id']}?err=files", status_code=303)
+    c.execute("DELETE FROM ie_report_items WHERE id=?", (iid,))
+    c.commit(); c.close()
+    db.log(user["email"], "ie:item:delete", row["review_item"][:60])
+    return RedirectResponse(f"/ie/report/{row['report_id']}", status_code=303)
+
+# ---------------- 12b) IE template management ----------------
+@app.get("/ie/templates", response_class=HTMLResponse)
+def ie_templates(request: Request, t: int = 0, user=Depends(require_user)):
+    c = db.conn()
+    tmpls = c.execute("SELECT t.*, "
+                      "(SELECT COUNT(*) FROM ie_template_sections s WHERE s.template_id=t.id) AS n_sec, "
+                      "(SELECT COUNT(*) FROM ie_template_items i JOIN ie_template_sections s "
+                      " ON s.id=i.section_id WHERE s.template_id=t.id) AS n_items "
+                      "FROM ie_templates t ORDER BY t.active DESC, t.name").fetchall()
+    sel = t or (tmpls[0]["id"] if tmpls else 0)
+    cur = c.execute("SELECT * FROM ie_templates WHERE id=?", (sel,)).fetchone()
+    sections = []
+    if cur:
+        for s in c.execute("SELECT * FROM ie_template_sections WHERE template_id=? "
+                           "ORDER BY sort_order, id", (sel,)):
+            items = c.execute("SELECT * FROM ie_template_items WHERE section_id=? "
+                              "ORDER BY sort_order, id", (s["id"],)).fetchall()
+            sections.append({"sec": s, "items": items})
+    history = c.execute("SELECT * FROM ie_template_revisions WHERE template_id=? "
+                        "ORDER BY id DESC LIMIT 15", (sel,)).fetchall() if cur else []
+    usage = c.execute("SELECT r.id, r.name, p.name AS product FROM ie_reports r "
+                      "JOIN products p ON p.id=r.product_id WHERE r.template_id=? AND r.active=1",
+                      (sel,)).fetchall() if cur else []
+    c.close()
+    return templates.TemplateResponse(request, "ie_templates.html", {"user": user, "tmpls": tmpls,
+        "cur": cur, "sections": sections, "history": history, "usage": usage,
+        "categories": db.CATEGORIES, "reviewers": db.IE_REVIEWERS, "priorities": db.IE_PRIORITIES})
+
+@app.post("/ie/templates/add")
+def ie_tmpl_add(request: Request, name: str = Form(...), reviewer: str = Form("DNV"),
+                category: str = Form(""), notes: str = Form(""), source_url: str = Form(""),
+                copy_from: str = Form(""), user=Depends(require_editor)):
+    nm = name.strip()
+    if not nm:
+        return RedirectResponse("/ie/templates", status_code=303)
+    c = db.conn()
+    if c.execute("SELECT 1 FROM ie_templates WHERE name=?", (nm,)).fetchone():
+        c.close()
+        return RedirectResponse("/ie/templates?err=dup", status_code=303)
+    c.execute("INSERT INTO ie_templates(name, reviewer, category, notes, source_url, "
+              "created_by, created_at) VALUES(?,?,?,?,?,?,?)",
+              (nm, reviewer, category if category in db.CATEGORIES else "", notes.strip(),
+               source_url.strip(), user["email"], now()))
+    tid = c.execute("SELECT id FROM ie_templates WHERE name=?", (nm,)).fetchone()["id"]
+    if copy_from.strip().isdigit():
+        for s in c.execute("SELECT * FROM ie_template_sections WHERE template_id=? "
+                           "ORDER BY sort_order, id", (int(copy_from),)).fetchall():
+            c.execute("INSERT INTO ie_template_sections(template_id, code, title, owner, sort_order) "
+                      "VALUES(?,?,?,?,?)", (tid, s["code"], s["title"], s["owner"], s["sort_order"]))
+            nsid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+            c.execute("INSERT INTO ie_template_items(section_id, item_id, sub_section, review_item, "
+                      "evidence, suggested_owner, priority, source, sort_order) "
+                      "SELECT ?, item_id, sub_section, review_item, evidence, suggested_owner, "
+                      "priority, source, sort_order FROM ie_template_items WHERE section_id=?",
+                      (nsid, s["id"]))
+    c.commit(); c.close()
+    db.log(user["email"], "ie:template:add", nm)
+    return RedirectResponse(f"/ie/templates?t={tid}", status_code=303)
+
+@app.post("/ie/templates/{tid}/edit")
+def ie_tmpl_edit(tid: int, request: Request, name: str = Form(...), reviewer: str = Form("DNV"),
+                 category: str = Form(""), notes: str = Form(""), source_url: str = Form(""),
+                 user=Depends(require_editor)):
+    nm = name.strip()
+    if not nm:
+        return RedirectResponse(f"/ie/templates?t={tid}", status_code=303)
+    c = db.conn()
+    if c.execute("SELECT 1 FROM ie_templates WHERE name=? AND id<>?", (nm, tid)).fetchone():
+        c.close()
+        return RedirectResponse(f"/ie/templates?t={tid}&err=dup", status_code=303)
+    db.ie_record_revision(c, tid, "scope", f"renamed/rescoped to '{nm}'", user["email"])
+    c.execute("UPDATE ie_templates SET name=?, reviewer=?, category=?, notes=?, source_url=? "
+              "WHERE id=?", (nm, reviewer, category if category in db.CATEGORIES else "",
+                             notes.strip(), source_url.strip(), tid))
+    c.commit(); c.close()
+    db.log(user["email"], "ie:template:edit", nm)
+    return RedirectResponse(f"/ie/templates?t={tid}", status_code=303)
+
+@app.post("/ie/templates/{tid}/toggle")
+def ie_tmpl_toggle(tid: int, request: Request, user=Depends(require_editor)):
+    c = db.conn()
+    db.ie_record_revision(c, tid, "retire/restore", "", user["email"])
+    c.execute("UPDATE ie_templates SET active = 1 - active WHERE id=?", (tid,))
+    c.commit(); c.close()
+    return RedirectResponse(f"/ie/templates?t={tid}", status_code=303)
+
+@app.post("/ie/templates/{tid}/section/add")
+def ie_sec_add(tid: int, request: Request, title: str = Form(...), code: str = Form(""),
+               owner: str = Form(""), user=Depends(require_editor)):
+    ti = title.strip()
+    if ti:
+        c = db.conn()
+        db.ie_record_revision(c, tid, "add section", ti, user["email"])
+        nxt = c.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM ie_template_sections "
+                        "WHERE template_id=?", (tid,)).fetchone()[0]
+        c.execute("INSERT INTO ie_template_sections(template_id, code, title, owner, sort_order) "
+                  "VALUES(?,?,?,?,?)", (tid, code.strip(), ti, owner.strip(), nxt))
+        c.commit(); c.close()
+        db.log(user["email"], "ie:section:add", ti)
+    return RedirectResponse(f"/ie/templates?t={tid}", status_code=303)
+
+@app.post("/ie/templates/section/{sid}/save")
+def ie_sec_save(sid: int, request: Request, title: str = Form(...), code: str = Form(""),
+                owner: str = Form(""), sort_order: int = Form(0), user=Depends(require_editor)):
+    c = db.conn()
+    row = c.execute("SELECT template_id, title FROM ie_template_sections WHERE id=?", (sid,)).fetchone()
+    if not row or not title.strip():
+        c.close()
+        return RedirectResponse("/ie/templates", status_code=303)
+    db.ie_record_revision(c, row["template_id"], "edit section", row["title"], user["email"])
+    c.execute("UPDATE ie_template_sections SET title=?, code=?, owner=?, sort_order=? WHERE id=?",
+              (title.strip(), code.strip(), owner.strip(), sort_order, sid))
+    c.commit(); c.close()
+    return RedirectResponse(f"/ie/templates?t={row['template_id']}", status_code=303)
+
+@app.post("/ie/templates/section/{sid}/delete")
+def ie_sec_delete(sid: int, request: Request, user=Depends(require_editor)):
+    c = db.conn()
+    row = c.execute("SELECT template_id, title FROM ie_template_sections WHERE id=?", (sid,)).fetchone()
+    if not row:
+        c.close()
+        return RedirectResponse("/ie/templates", status_code=303)
+    db.ie_record_revision(c, row["template_id"], "delete section", row["title"], user["email"])
+    c.execute("DELETE FROM ie_template_sections WHERE id=?", (sid,))
+    c.commit(); c.close()
+    db.log(user["email"], "ie:section:delete", row["title"])
+    return RedirectResponse(f"/ie/templates?t={row['template_id']}", status_code=303)
+
+@app.post("/ie/templates/section/{sid}/item/add")
+def ie_tmpl_item_add(sid: int, request: Request, review_item: str = Form(...),
+                     item_id: str = Form(""), sub_section: str = Form(""),
+                     evidence: str = Form(""), suggested_owner: str = Form(""),
+                     priority: str = Form("Normal"), source: str = Form(""),
+                     user=Depends(require_editor)):
+    ri = review_item.strip()
+    c = db.conn()
+    row = c.execute("SELECT template_id FROM ie_template_sections WHERE id=?", (sid,)).fetchone()
+    if not row or not ri:
+        c.close()
+        return RedirectResponse("/ie/templates", status_code=303)
+    db.ie_record_revision(c, row["template_id"], "add item", ri, user["email"])
+    nxt = c.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM ie_template_items "
+                    "WHERE section_id=?", (sid,)).fetchone()[0]
+    c.execute("INSERT INTO ie_template_items(section_id, item_id, sub_section, review_item, "
+              "evidence, suggested_owner, priority, source, sort_order) VALUES(?,?,?,?,?,?,?,?,?)",
+              (sid, item_id.strip(), sub_section.strip(), ri, evidence.strip(),
+               suggested_owner.strip(),
+               priority if priority in db.IE_PRIORITIES else "Normal", source.strip(), nxt))
+    c.commit(); c.close()
+    db.log(user["email"], "ie:template:item:add", ri[:60])
+    return RedirectResponse(f"/ie/templates?t={row['template_id']}", status_code=303)
+
+@app.post("/ie/templates/item/{iid}/save")
+def ie_tmpl_item_save(iid: int, request: Request, review_item: str = Form(...),
+                      item_id: str = Form(""), sub_section: str = Form(""),
+                      evidence: str = Form(""), suggested_owner: str = Form(""),
+                      priority: str = Form("Normal"), sort_order: int = Form(0),
+                      user=Depends(require_editor)):
+    c = db.conn()
+    row = c.execute("SELECT i.review_item, s.template_id FROM ie_template_items i "
+                    "JOIN ie_template_sections s ON s.id=i.section_id WHERE i.id=?", (iid,)).fetchone()
+    if not row or not review_item.strip():
+        c.close()
+        return RedirectResponse("/ie/templates", status_code=303)
+    db.ie_record_revision(c, row["template_id"], "edit item", row["review_item"], user["email"])
+    c.execute("UPDATE ie_template_items SET review_item=?, item_id=?, sub_section=?, evidence=?, "
+              "suggested_owner=?, priority=?, sort_order=? WHERE id=?",
+              (review_item.strip(), item_id.strip(), sub_section.strip(), evidence.strip(),
+               suggested_owner.strip(),
+               priority if priority in db.IE_PRIORITIES else "Normal", sort_order, iid))
+    c.commit(); c.close()
+    return RedirectResponse(f"/ie/templates?t={row['template_id']}", status_code=303)
+
+@app.post("/ie/templates/item/{iid}/delete")
+def ie_tmpl_item_delete(iid: int, request: Request, user=Depends(require_editor)):
+    c = db.conn()
+    row = c.execute("SELECT i.review_item, s.template_id FROM ie_template_items i "
+                    "JOIN ie_template_sections s ON s.id=i.section_id WHERE i.id=?", (iid,)).fetchone()
+    if not row:
+        c.close()
+        return RedirectResponse("/ie/templates", status_code=303)
+    db.ie_record_revision(c, row["template_id"], "delete item", row["review_item"], user["email"])
+    c.execute("DELETE FROM ie_template_items WHERE id=?", (iid,))
+    c.commit(); c.close()
+    return RedirectResponse(f"/ie/templates?t={row['template_id']}", status_code=303)
+
+@app.post("/ie/templates/undo/{rev_id}")
+def ie_tmpl_undo(rev_id: int, request: Request, user=Depends(require_editor)):
+    c = db.conn()
+    res = db.ie_restore_revision(c, rev_id, user["email"])
+    if not res:
+        c.close()
+        return RedirectResponse("/ie/templates?err=gone", status_code=303)
+    tid, action = res
+    c.commit(); c.close()
+    db.log(user["email"], "ie:template:undo", f"t{tid}: reverted '{action}'")
+    return RedirectResponse(f"/ie/templates?t={tid}&undone={action}", status_code=303)
+
+@app.get("/ie/report/{rid}/bundle.zip")
+def ie_bundle(rid: int, request: Request, user=Depends(require_user)):
+    """The IE evidence pack: files foldered by section, with manifest and summary."""
+    c = db.conn()
+    r = c.execute("SELECT r.*, p.name AS product FROM ie_reports r JOIN products p ON p.id=r.product_id "
+                  "WHERE r.id=?", (rid,)).fetchone()
+    if not r:
+        c.close()
+        return RedirectResponse("/ie", status_code=303)
+    groups, totals, atts = _ie_progress(c, rid)
+    c.close()
+    stamp = datetime.datetime.now().strftime("%Y%m%d")
+    base = f"{_safe(r['reviewer'], 20)}_{_safe(r['product'], 40)}_IE_{stamp}"
+    path = os.path.join(PKG_DIR, base + ".zip")
+    man, summ = [], []
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for gi, g in enumerate(groups, 1):
+            folder = f"{gi:02d}_{_safe(g['sec']['title'], 50)}"
+            for it in g["items"]:
+                files = atts.get(it["id"], [])
+                summ.append([g["sec"]["title"], it["item_id"], it["sub_section"],
+                             it["review_item"], it["evidence"], it["priority"], it["status"],
+                             it["owner"], it["due_date"], len(files),
+                             "INCLUDED" if files else "NO EVIDENCE", it["gap"]])
+                for f in files:
+                    arc = f"{folder}/{_safe(it['item_id'] or it['sub_section'], 40)}/{_safe(f['filename'], 90)}"
+                    if os.path.exists(f["stored_path"]):
+                        z.write(f["stored_path"], arc)
+                        man.append([g["sec"]["title"], it["item_id"], it["review_item"], arc])
+                    else:
+                        man.append([g["sec"]["title"], it["item_id"], it["review_item"],
+                                    "FILE NOT FOUND ON DISK"])
+
+        def csv_bytes(header, rows):
+            buf = io.StringIO(); w = csv.writer(buf); w.writerow(header)
+            for row in rows:
+                w.writerow(row)
+            return buf.getvalue()
+
+        z.writestr("MANIFEST.csv", csv_bytes(
+            ["Section", "Item ID", "Review item", "Path in zip"], man))
+        z.writestr("IE_SUMMARY.csv", csv_bytes(
+            ["Section", "Item ID", "Sub-section", "Preparation item / review question",
+             "Required evidence", "Priority", "Status", "Owner", "Due", "Files", "Result",
+             "Gap / action"], summ))
+        L = ["IE TECHNOLOGY REVIEW - EVIDENCE SUMMARY", "=" * 62,
+             f"Product      : {r['product']}",
+             f"Report       : {r['name']}",
+             f"Reviewer     : {r['reviewer']}",
+             f"Status       : {r['status']}",
+             f"Kickoff      : {r['kickoff_date'] or '-'}    Target: {r['target_date'] or '-'}",
+             f"Built        : {now()} by {user['email']}", ""]
+        if r["shared_with"]:
+            L += [f"Shared with  : {r['shared_with']}", ""]
+        L += [f"{totals['done']}/{totals['n']} items accepted ({totals['pct']}%), "
+              f"{totals['wip']} in progress, {totals['blocked']} blocked, "
+              f"{totals['crit_open']} Critical still open.",
+              f"{totals['files']} evidence file(s) attached.", "",
+              "BY SECTION", "-" * 62,
+              f"{'Section':<44}{'Items':>6}{'Done':>6}{'Files':>6}"]
+        for g in groups:
+            L.append(f"{g['sec']['title'][:43]:<44}{g['n']:>6}{g['done']:>6}{g['files']:>6}")
+        L += [f"{'TOTAL':<44}{totals['n']:>6}{totals['done']:>6}{totals['files']:>6}", "",
+              "DETAIL", "-" * 62]
+        for gi, g in enumerate(groups, 1):
+            L.append(f"{gi:02d}. {g['sec']['title']}  ({g['done']}/{g['n']}, owner: {g['sec']['owner'] or '-'})")
+            for it in g["items"]:
+                files = atts.get(it["id"], [])
+                mark = "[x]" if files else "[ ]"
+                L.append(f"    {mark} {it['item_id']:<6} ({it['priority']}, {it['status']}) {it['review_item']}")
+                if it["evidence"]:
+                    L.append(f"           evidence: {it['evidence']}")
+                for f in files:
+                    L.append(f"           - {f['filename']}")
+                if it["gap"]:
+                    L.append(f"           GAP: {it['gap']}")
+            L.append("")
+        z.writestr("IE_SUMMARY.txt", "\n".join(L))
+    db.log(user["email"], "ie:bundle", f"{r['name']} - {totals['files']} files")
+    return FileResponse(path, filename=base + ".zip", media_type="application/zip")

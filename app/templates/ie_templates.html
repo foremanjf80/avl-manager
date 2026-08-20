@@ -1,0 +1,102 @@
+{% extends "base.html" %}{% block body %}
+<h2>IE Report Templates</h2>
+<p class="hint">The section-and-item structure of an IE technology review. Separate from the AVL
+<a href="/workstreams">workstream templates</a> by design. Starting a review on
+<a href="/ie">IE / DNV</a> copies a template into that report, so later template edits do not disturb
+reviews already under way.</p>
+{% if request.query_params.get('err') == 'dup' %}<p class="hint" style="color:#b00">A template with that name already exists.</p>{% endif %}
+{% if request.query_params.get('err') == 'gone' %}<p class="hint" style="color:#b00">That restore point no longer exists.</p>{% endif %}
+{% if request.query_params.get('undone') %}<p class="hint" style="color:#2e7d32">Rolled back "{{ request.query_params.get('undone') }}".</p>{% endif %}
+
+<div class="card"><h3>Library</h3>
+<table class="list"><tr><th>Template</th><th>Reviewer</th><th>Product type</th><th>Sections</th><th>Items</th><th></th></tr>
+{% for t in tmpls %}<tr class="{{ 'inactive' if not t.active }}{{ ' sel' if cur and t.id==cur.id }}">
+<td><a href="/ie/templates?t={{ t.id }}"><b>{{ t.name }}</b></a></td>
+<td>{{ t.reviewer }}</td><td>{{ t.category or 'Any' }}</td><td>{{ t.n_sec }}</td><td>{{ t.n_items }}</td>
+<td><form method="post" action="/ie/templates/{{ t.id }}/toggle" class="inline"><button>{{ 'Retire' if t.active else 'Restore' }}</button></form></td>
+</tr>{% endfor %}</table>
+<h3>New template</h3>
+<form method="post" action="/ie/templates/add" class="row">
+<input name="name" placeholder="Template name" required>
+<select name="reviewer">{% for rv in reviewers %}<option>{{ rv }}</option>{% endfor %}</select>
+<select name="category"><option value="">Any product type</option>{% for c in categories %}<option>{{ c }}</option>{% endfor %}</select>
+<select name="copy_from"><option value="">Start empty</option>{% for t in tmpls %}<option value="{{ t.id }}">Copy from: {{ t.name }}</option>{% endfor %}</select>
+<input name="notes" placeholder="Notes" size="18">
+<input name="source_url" placeholder="Source workbook URL" size="18">
+<button>Create</button></form></div>
+
+{% if cur %}
+<div class="card"><h3>{{ cur.name }}</h3>
+<form method="post" action="/ie/templates/{{ cur.id }}/edit" class="row">
+<input name="name" value="{{ cur.name }}" size="34" required>
+<select name="reviewer">{% for rv in reviewers %}<option {% if cur.reviewer==rv %}selected{% endif %}>{{ rv }}</option>{% endfor %}</select>
+<select name="category"><option value="" {% if not cur.category %}selected{% endif %}>Any product type</option>
+{% for c in categories %}<option {% if cur.category==c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select>
+<input name="notes" value="{{ cur.notes }}" size="22" placeholder="Notes">
+<input name="source_url" value="{{ cur.source_url }}" size="22" placeholder="Source workbook URL">
+<button>Save</button></form>
+{% if cur.source_url %}<p class="hint">Source: <a href="{{ cur.source_url }}" target="_blank" rel="noopener">{{ cur.source_url }}</a></p>{% endif %}
+
+{% for s in sections %}
+<h4 class="grp">{{ s.sec.code }} &mdash; {{ s.sec.title }} <span class="sub2">{{ s['items']|length }} items</span></h4>
+<form method="post" action="/ie/templates/section/{{ s.sec.id }}/save" class="row" style="margin-bottom:4px">
+<input name="sort_order" value="{{ s.sec.sort_order }}" size="2" title="Order">
+<input name="code" value="{{ s.sec.code }}" size="18" placeholder="Sheet code">
+<input name="title" value="{{ s.sec.title }}" size="40" required>
+<input name="owner" value="{{ s.sec.owner }}" size="26" placeholder="Primary owner">
+<button>Save section</button></form>
+<table class="list"><tr><th>#</th><th>ID</th><th>Sub-section</th><th>Preparation item / review question</th><th>Required evidence</th><th>Suggested owner</th><th>Priority</th><th></th><th></th></tr>
+{% for i in s['items'] %}<tr><form method="post" action="/ie/templates/item/{{ i.id }}/save">
+<td><input name="sort_order" value="{{ i.sort_order }}" size="2"></td>
+<td><input name="item_id" value="{{ i.item_id }}" size="4"></td>
+<td><input name="sub_section" value="{{ i.sub_section }}" size="18"></td>
+<td><input name="review_item" value="{{ i.review_item }}" size="46" required></td>
+<td><input name="evidence" value="{{ i.evidence }}" size="24"></td>
+<td><input name="suggested_owner" value="{{ i.suggested_owner }}" size="16"></td>
+<td><select name="priority">{% for p in priorities %}<option {% if i.priority==p %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></td>
+<td><button>Save</button></td></form>
+<td><form method="post" action="/ie/templates/item/{{ i.id }}/delete" class="inline"
+      onsubmit="return confirm('Remove this review item from the template?')"><button>&times;</button></form></td>
+</tr>{% else %}<tr><td colspan="9" class="hint">No items in this section yet.</td></tr>{% endfor %}</table>
+<form method="post" action="/ie/templates/section/{{ s.sec.id }}/item/add" class="row" style="margin-bottom:12px">
+<input name="item_id" placeholder="ID" size="4">
+<input name="sub_section" placeholder="Sub-section" size="18">
+<input name="review_item" placeholder="Preparation item / review question" size="46" required>
+<input name="evidence" placeholder="Required evidence" size="24">
+<input name="suggested_owner" placeholder="Suggested owner" size="16">
+<select name="priority">{% for p in priorities %}<option {% if p=='Normal' %}selected{% endif %}>{{ p }}</option>{% endfor %}</select>
+<button>Add item</button>
+<span style="flex:1"></span>
+<span class="inline"><form method="post" action="/ie/templates/section/{{ s.sec.id }}/delete" class="inline"
+      onsubmit="return confirm('Delete the whole &quot;{{ s.sec.title }}&quot; section and its {{ s['items']|length }} item(s)? Undo is available afterwards.')">
+<button>Delete section</button></form></span></form>
+{% else %}<p class="hint">No sections yet &mdash; add the first one below.</p>{% endfor %}
+
+<h4>Add section</h4>
+<form method="post" action="/ie/templates/{{ cur.id }}/section/add" class="row">
+<input name="code" placeholder="Sheet code, e.g. 13 Appendix" size="20">
+<input name="title" placeholder="Section title" size="40" required>
+<input name="owner" placeholder="Primary owner" size="24">
+<button>Add section</button></form>
+
+<h4>Recent changes &mdash; undo</h4>
+<table class="list"><tr><th>When</th><th>Change</th><th>By</th><th></th></tr>
+{% for rv in history %}<tr>
+<td class="sub2">{{ rv.ts[:16] }}</td>
+<td>{{ rv.action }}{% if rv.detail %} <span class="sub2">&mdash; {{ rv.detail[:80] }}</span>{% endif %}</td>
+<td class="sub2">{{ rv.actor }}</td>
+<td><form method="post" action="/ie/templates/undo/{{ rv.id }}" class="inline"
+      onsubmit="return confirm('Roll this template back to how it was before &quot;{{ rv.action }}&quot; on {{ rv.ts[:16] }}?')">
+<button>{{ 'Undo' if loop.first else 'Revert to here' }}</button></form></td>
+</tr>{% else %}<tr><td colspan="4" class="hint">No changes recorded yet. Adding, editing or deleting a
+section or item puts it here with an <b>Undo</b> button.</td></tr>{% endfor %}</table>
+<p class="hint">Each row is the template as it stood <em>before</em> that change. Reviews already started
+are unaffected &mdash; they hold their own copy.</p>
+
+{% if usage %}
+<h4>Reviews started from this template</h4>
+<ul class="hint">{% for u in usage %}<li><a href="/ie/report/{{ u.id }}">{{ u.name }}</a> &mdash; {{ u.product }}</li>{% endfor %}</ul>
+{% endif %}
+</div>
+{% endif %}
+{% endblock %}

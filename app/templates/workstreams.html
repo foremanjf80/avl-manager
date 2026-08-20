@@ -4,6 +4,8 @@
 and optionally to a single TPO. The Dataroom page offers the best-matching templates when you seed a
 product &times; TPO checklist.</p>
 {% if request.query_params.get('err') == 'dup' %}<p class="hint" style="color:#b00">A template with that name already exists.</p>{% endif %}
+{% if request.query_params.get('err') == 'gone' %}<p class="hint" style="color:#b00">That restore point no longer exists.</p>{% endif %}
+{% if request.query_params.get('undone') %}<p class="hint" style="color:#2e7d32">Rolled back "{{ request.query_params.get('undone') }}". The rollback itself is in the list below if you need to reverse it.</p>{% endif %}
 
 <div class="cols">
 <div class="card"><h3>Library</h3>
@@ -63,6 +65,23 @@ create it scoped to that AVL, then add the extras below.</p></div>
 <select name="obligation">{% for ob in obligations %}<option>{{ ob }}</option>{% endfor %}</select>
 <input name="description" placeholder="Notes" size="26">
 <button>Add</button></form>
+
+<h4>Recent changes &mdash; undo</h4>
+<table class="list"><tr><th>When</th><th>Change</th><th>By</th><th></th></tr>
+{% for rv in history %}<tr>
+<td class="sub2">{{ rv.ts[:16] }}</td>
+<td>{{ rv.action }}{% if rv.detail %} <span class="sub2">&mdash; {{ rv.detail }}</span>{% endif %}</td>
+<td class="sub2">{{ rv.actor }}</td>
+<td><form method="post" action="/workstreams/undo/{{ rv.id }}" class="inline"
+      onsubmit="return confirm('Roll this template back to how it was before &quot;{{ rv.action }}&quot; on {{ rv.ts[:16] }}? Later changes to this template will be undone too.')">
+<button>{{ 'Undo' if loop.first else 'Revert to here' }}</button></form></td>
+</tr>{% else %}<tr><td colspan="4" class="hint">No changes recorded yet. As soon as you add, edit,
+delete, rename or rescope anything on this template, it appears here with an <b>Undo</b> button.</td></tr>
+{% endfor %}</table>
+<p class="hint">Each row is the template as it stood <em>before</em> that change, so <b>Undo</b> reverses the
+most recent one and <b>Revert to here</b> rolls back to any earlier point. The rollback is itself recorded,
+so it can be reversed too. Checklists already seeded from this template are not touched &mdash; re-apply it
+from the <a href="/dataroom">Dataroom</a> page to push a change through.</p>
 
 {% if usage %}
 <h4>In use</h4>

@@ -1,0 +1,91 @@
+{% extends "base.html" %}{% block body %}
+<div class="row" style="justify-content:space-between">
+<h2>{{ r.name }}</h2>
+<a class="btn small" href="/ie/report/{{ r.id }}/bundle.zip">Download evidence pack</a></div>
+<p class="hint"><a href="/ie">All IE reviews</a> &middot; {{ r.product }} ({{ r.category }})</p>
+{% if request.query_params.get('err') == 'files' %}
+<p class="hint" style="color:#b00">That item still has evidence attached. Re-file it on <a href="/files">Files</a> first.</p>{% endif %}
+
+<div class="card"><h3>Engagement</h3>
+<form method="post" action="/ie/report/{{ r.id }}/save" class="row">
+<input name="name" value="{{ r.name }}" size="34" required>
+<select name="reviewer">{% for rv in reviewers %}<option {% if r.reviewer==rv %}selected{% endif %}>{{ rv }}</option>{% endfor %}</select>
+<select name="status">{% for st in report_statuses %}<option {% if r.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select>
+<input name="kickoff_date" type="date" value="{{ r.kickoff_date }}" title="Kickoff">
+<input name="target_date" type="date" value="{{ r.target_date }}" title="Target">
+<input name="shared_with" value="{{ r.shared_with }}" size="24" placeholder="Shared with (TPOs)">
+<input name="notes" value="{{ r.notes }}" size="28" placeholder="Notes">
+<button>Save</button></form></div>
+
+<div class="card"><h3>Progress by section</h3>
+<table class="list track"><tr><th>Section</th><th>Owner</th><th>Accepted</th><th></th>
+<th>In progress</th><th>Blocked</th><th>Not started</th><th>Critical open</th><th>Files</th></tr>
+{% for g in groups %}<tr>
+<td><a href="#s{{ g.sec.id }}"><b>{{ g.sec.title }}</b></a></td>
+<td class="sub2">{{ g.sec.owner or '-' }}</td>
+<td>{{ g.done }}/{{ g.n }}</td>
+<td class="barcell"><span class="bar"><i style="width:{{ g.pct }}%" class="{{ 'full' if g.pct==100 else '' }}"></i></span> <span class="sub2">{{ g.pct }}%</span></td>
+<td>{{ g.wip or '' }}</td><td>{% if g.blocked %}<b class="bad">{{ g.blocked }}</b>{% endif %}</td>
+<td>{{ g.open or '' }}</td><td>{% if g.crit_open %}<b class="bad">{{ g.crit_open }}</b>{% endif %}</td>
+<td class="sub2">{{ g.files }}</td></tr>
+{% endfor %}
+<tr class="totals"><td><b>All sections</b></td><td></td><td><b>{{ totals.done }}/{{ totals.n }}</b></td>
+<td class="barcell"><span class="bar"><i style="width:{{ totals.pct }}%" class="{{ 'full' if totals.pct==100 else '' }}"></i></span> <span class="sub2">{{ totals.pct }}%</span></td>
+<td>{{ totals.wip or '' }}</td><td>{% if totals.blocked %}<b class="bad">{{ totals.blocked }}</b>{% endif %}</td>
+<td>{{ totals.open or '' }}</td><td>{% if totals.crit_open %}<b class="bad">{{ totals.crit_open }}</b>{% endif %}</td>
+<td class="sub2">{{ totals.files }}</td></tr>
+</table>
+<form method="get" action="/ie/report/{{ r.id }}" class="row" style="margin-top:8px">
+<select name="only" onchange="this.form.submit()">
+<option value="">All items</option>
+{% for k, lbl in [('open','Still open'), ('critical','Critical only'), ('blocked','Blocked'), ('nofile','No evidence attached')] %}
+<option value="{{ k }}" {% if only==k %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select>
+<span class="sub2" style="align-self:center">The rollup above always covers the whole report.</span>
+</form></div>
+
+{% for g in groups %}
+<h3 class="grp" id="s{{ g.sec.id }}">{{ g.sec.title }}
+<span class="sub2">{{ g.done }}/{{ g.n }} accepted</span></h3>
+<form method="post" action="/ie/report/{{ r.id }}/section/{{ g.sec.id }}/save" class="inline" style="margin-bottom:6px">
+<span class="sub2">Section owner</span>
+<select name="owner_person_id"><option value="">- from template: {{ g.sec.owner or 'none' }} -</option>
+{% for p in people %}<option value="{{ p.id }}" {% if g.sec.owner_person_id==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+<input name="owner_other" placeholder="or free text" size="18"><button>Set</button></form>
+
+<table class="list"><tr><th>ID</th><th>Sub-section / review question</th><th></th><th>Status</th><th>Owner</th><th>Due</th><th>Gap / action</th><th></th></tr>
+{% for i in g['items'] %}<tr>
+<td class="sub2 nowrap">{{ i.item_id }}</td>
+<td class="wrap"><b>{{ i.sub_section }}</b><div>{{ i.review_item }}</div>
+{% if i.evidence %}<div class="sub2">Evidence: {{ i.evidence }}</div>{% endif %}
+{% if i.source %}<div class="sub2">{{ i.source }}</div>{% endif %}</td>
+<td><span class="ob ob-{{ 'Required' if i.priority=='Critical' else ('Conditional' if i.priority=='High' else 'Optional') }}">{{ i.priority[:4] }}</span></td>
+<form method="post" action="/ie/item/{{ i.id }}/save">
+<td><select name="status" class="cs-{{ i.status|replace(' ','') }}">{% for st in item_statuses %}<option {% if i.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select>
+<select name="priority">{% for p in priorities %}<option {% if i.priority==p %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></td>
+<td><select name="owner_person_id"><option value="">- {{ i.owner or 'unassigned' }} -</option>
+{% for p in people %}<option value="{{ p.id }}" {% if i.owner_person_id==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+<input name="owner_other" size="12" placeholder="or free text"></td>
+<td><input name="due_date" value="{{ i.due_date }}" size="9" placeholder="End Aug"></td>
+<td><input name="gap" value="{{ i.gap }}" size="24" placeholder="Gap / action required">
+<input name="notes" value="{{ i.notes }}" size="20" placeholder="Notes"></td>
+<td><button>Save</button></td></form></tr>
+<tr class="attrow"><td></td><td colspan="5" class="sub2">
+{% for f in atts.get(i.id, []) %}<a href="/files/{{ f.id }}/download">{{ f.filename }}</a>{% if not loop.last %} &middot; {% endif %}{% else %}<span class="hint">no evidence attached</span>{% endfor %}</td>
+<td colspan="2"><form method="post" action="/files/upload" enctype="multipart/form-data" class="inline">
+<input type="hidden" name="kind" value="ie_item"><input type="hidden" name="ref_id" value="{{ i.id }}">
+<input type="hidden" name="next_url" value="/ie/report/{{ r.id }}{% if only %}?only={{ only }}{% endif %}">
+<input type="file" name="f" required style="width:130px"><button>Attach</button></form>
+<form method="post" action="/ie/item/{{ i.id }}/delete" class="inline"
+      onsubmit="return confirm('Remove this review item from the report?')"><button>&times;</button></form></td></tr>
+{% else %}<tr><td colspan="8" class="hint">No items match the filter.</td></tr>{% endfor %}</table>
+
+<form method="post" action="/ie/report/{{ r.id }}/item/add" class="row" style="margin-bottom:14px">
+<input type="hidden" name="section_id" value="{{ g.sec.id }}">
+<input name="item_id" placeholder="ID" size="5">
+<input name="sub_section" placeholder="Sub-section" size="18">
+<input name="review_item" placeholder="Preparation item / review question" size="44" required>
+<input name="evidence" placeholder="Required evidence" size="22">
+<select name="priority">{% for p in priorities %}<option {% if p=='Normal' %}selected{% endif %}>{{ p }}</option>{% endfor %}</select>
+<button>Add item</button></form>
+{% endfor %}
+{% endblock %}

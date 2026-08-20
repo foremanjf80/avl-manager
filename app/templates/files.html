@@ -1,5 +1,6 @@
 {% extends "base.html" %}{% block body %}
 <h2>Attachments</h2>
+<h3 class="grp">AVL dataroom</h3>
 
 {% if request.query_params.get('err') == 'empty' %}
 <p class="hint" style="color:#b00">Nothing is filed under that target yet, so there was nothing to download.</p>
@@ -50,9 +51,38 @@ against a different pairing, apply a template to it on the <a href="/dataroom">D
 Apply a template to a product &times; TPO on the <a href="/dataroom">Dataroom</a> page to create them.</p>
 {% endif %}
 
+<h3 class="grp">DNV / IE evidence</h3>
+<div class="cols">
+<div class="card"><h3>Upload evidence</h3>
+{% if ie_rows %}
+<form method="post" action="/files/upload" enctype="multipart/form-data" class="picker iepick">
+<input type="hidden" name="kind" value="ie_item">
+<select class="ie_rep"></select><select class="ie_sec"></select>
+<select name="ref_id" class="ie_item"></select>
+<input type="file" name="f" required><button>Upload</button></form>
+<p class="hint">Files the IE reviewer asked for, against the review item they answer. The same file also
+shows inline on the <a href="/ie">report</a> page.</p>
+{% else %}
+<p class="hint">No IE reviews started yet. Start one on <a href="/ie">DNV / IE</a> and its review items
+appear here.</p>{% endif %}</div>
+
+<div class="card"><h3>Download evidence</h3>
+{% if ie_rows %}
+<form method="get" action="/files/bundle.zip" class="picker iepick">
+<select name="kind" class="ie_kind">{% for k, lbl in ie_bundle_kinds.items() %}<option value="{{ k }}">{{ lbl }}</option>{% endfor %}</select>
+<select class="ie_rep"></select><select class="ie_sec"></select>
+<select name="ref_id" class="ie_item"></select>
+<button>Download ZIP</button></form>
+<p class="hint">One item, one section, or the whole report foldered by section &mdash; the same pack as the
+Download evidence pack button on the report.</p>
+{% else %}<p class="hint">Nothing to download until a review exists.</p>{% endif %}</div>
+</div>
+
+
+
 <form method="get" action="/files" class="row" style="margin-bottom:10px">
 <select name="kind" onchange="this.form.submit()"><option value="">All attachments</option>
-{% for k, lbl in [('checklist','Workstream requirement'), ('product','Product'), ('avl','TPO AVL'), ('call','Call')] %}
+{% for k, lbl in [('checklist','AVL: workstream requirement'), ('product','AVL: product'), ('avl','AVL: TPO'), ('call','AVL: call'), ('ie_item','DNV / IE evidence')] %}
 <option value="{{ k }}" {% if f_kind==k %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select>
 <span class="sub2" style="align-self:center">{{ atts|length }} file{{ '' if atts|length==1 else 's' }}</span>
 </form>
@@ -67,6 +97,7 @@ Apply a template to a product &times; TPO on the <a href="/dataroom">Dataroom</a
 <optgroup label="Product (no specific requirement)">{% for p in products %}<option value="product:{{ p.id }}" {% if a.kind=='product' and a.ref_id==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</optgroup>
 <optgroup label="TPO AVL (no specific requirement)">{% for v in avls %}<option value="avl:{{ v.id }}" {% if a.kind=='avl' and a.ref_id==v.id %}selected{% endif %}>{{ v.name }}</option>{% endfor %}</optgroup>
 <optgroup label="Call">{% for cl in calls %}<option value="call:{{ cl.id }}" {% if a.kind=='call' and a.ref_id==cl.id %}selected{% endif %}>{{ cl.avl_name }} {{ cl.call_date }}</option>{% endfor %}</optgroup>
+{% if ie_rows %}<optgroup label="DNV / IE review item">{% for ir in ie_rows %}<option value="ie_item:{{ ir.id }}" {% if a.kind=='ie_item' and a.ref_id==ir.id %}selected{% endif %}>{{ ir.product }} / {{ ir.reviewer }} &mdash; {{ ir.section }} / {{ ir.item_id }} {{ ir.sub_section }}</option>{% endfor %}</optgroup>{% endif %}
 </select><button>Move</button></form></td>
 <td class="sub2">{{ a.uploaded_by }}</td><td class="sub2">{{ a.uploaded_at[:16] }}</td>
 <td><form method="post" action="/files/{{ a.id }}/delete" class="inline"
@@ -125,6 +156,44 @@ document.querySelectorAll('form.picker').forEach(f => {
   }
   kindSel.addEventListener('change', pick);
   pick();
+});
+
+// DNV / IE pickers: report -> section -> item, independent of the AVL ones above.
+const IE = {{ ie_picker|tojson }};
+document.querySelectorAll('form.iepick').forEach(f => {
+  const rep = f.querySelector('.ie_rep'), sec = f.querySelector('.ie_sec'),
+        itm = f.querySelector('.ie_item'), kind = f.querySelector('.ie_kind');
+  function opt(v, t) { const o = document.createElement('option'); o.value = v; o.textContent = t; return o; }
+  function fillRep() {
+    rep.innerHTML = '';
+    IE.reports.forEach(([id, name]) => rep.appendChild(opt(id, name)));
+    fillSec();
+  }
+  function fillSec() {
+    sec.innerHTML = '';
+    const byS = IE.tree[rep.value] || {};
+    Object.keys(byS).forEach(sid => sec.appendChild(opt(sid, byS[sid].name)));
+    fillItm();
+  }
+  function fillItm() {
+    itm.innerHTML = '';
+    const entry = (IE.tree[rep.value] || {})[sec.value];
+    (entry ? entry.items : []).forEach(i =>
+      itm.appendChild(opt(i.id, i.label + ' [' + i.status + ']')));
+  }
+  // Download form: the chosen scope decides which select carries ref_id.
+  function scope() {
+    if (!kind) return;
+    const k = kind.value;
+    sec.style.display = (k === 'ie_report') ? 'none' : '';
+    itm.style.display = (k === 'ie_item') ? '' : 'none';
+    [rep, sec, itm].forEach(el => el.removeAttribute('name'));
+    ({ie_report: rep, ie_section: sec, ie_item: itm})[k].setAttribute('name', 'ref_id');
+  }
+  rep.addEventListener('change', () => { fillSec(); });
+  sec.addEventListener('change', fillItm);
+  if (kind) kind.addEventListener('change', scope);
+  fillRep(); scope();
 });
 </script>
 {% endblock %}

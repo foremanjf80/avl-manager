@@ -12,13 +12,40 @@ Back to the <a href="/dataroom?product={{ sel_p }}&amp;avl={{ sel_a }}">checklis
 <b>@</b>
 <select name="avl" onchange="this.form.submit()">{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel_a %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
 <select name="scope" onchange="this.form.submit()">{% for k, lbl in scopes.items() %}<option value="{{ k }}" {% if scope==k %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select>
+<select name="template" onchange="this.form.submit()">
+<option value="0">Compare against: {{ tmpl.name if tmpl else 'no template recorded' }}</option>
+{% for t in all_tmpls %}{% if not tmpl or t.id != tmpl.id %}<option value="{{ t.id }}">Compare against: {{ t.name }}</option>{% endif %}{% endfor %}</select>
 </form>
 
 <div class="card"><h3>What will be sent</h3>
 <p><b>{{ stats.n_files }}</b> file{{ '' if stats.n_files==1 else 's' }} across
 <b>{{ stats.n_reqs }}</b> requirement{{ '' if stats.n_reqs==1 else 's' }} in scope.
-{% if stats.n_gaps %}<b class="bad">{{ stats.n_gaps }}</b> have no file attached{% if stats.blocking %},
+{% if stats.n_gaps %}<b class="bad">{{ stats.n_gaps }}</b> have no file attached{% if drift %}
+<p class="hint" style="color:#b00"><b>{{ drift|length }}</b> requirement{{ '' if drift|length==1 else 's' }}
+in <b>{{ tmpl.name if tmpl else 'the template' }}</b> {{ 'is' if drift|length==1 else 'are' }} not on this
+checklist at all &mdash; the template changed after it was seeded. They are listed in the summary as
+NOT ON CHECKLIST. Re-apply the template in Merge mode on the
+<a href="/dataroom?product={{ sel_p }}&amp;avl={{ sel_a }}">Dataroom</a> page to start tracking them.</p>
+<details><summary class="sub2">Show the {{ drift|length }} untracked requirement(s)</summary>
+<table class="list"><tr><th>Document category</th><th>Required document</th><th></th></tr>
+{% for d in drift %}<tr><td class="sub2">{{ d.doc_category }}</td><td>{{ d.workstream }}</td>
+<td><span class="ob ob-{{ d.obligation }}">{{ d.obligation[:4] }}</span></td></tr>{% endfor %}</table></details>
+{% endif %}
+
+{% if stats.blocking %},
 of which <b class="bad">{{ stats.blocking }}</b> are Required{% endif %}.{% else %}Nothing is missing.{% endif %}</p>
+{% if drift %}
+<p class="hint" style="color:#b00"><b>{{ drift|length }}</b> requirement{{ '' if drift|length==1 else 's' }}
+in <b>{{ tmpl.name if tmpl else 'the template' }}</b> {{ 'is' if drift|length==1 else 'are' }} not on this
+checklist at all &mdash; the template changed after it was seeded. They are listed in the summary as
+NOT ON CHECKLIST. Re-apply the template in Merge mode on the
+<a href="/dataroom?product={{ sel_p }}&amp;avl={{ sel_a }}">Dataroom</a> page to start tracking them.</p>
+<details><summary class="sub2">Show the {{ drift|length }} untracked requirement(s)</summary>
+<table class="list"><tr><th>Document category</th><th>Required document</th><th></th></tr>
+{% for d in drift %}<tr><td class="sub2">{{ d.doc_category }}</td><td>{{ d.workstream }}</td>
+<td><span class="ob ob-{{ d.obligation }}">{{ d.obligation[:4] }}</span></td></tr>{% endfor %}</table></details>
+{% endif %}
+
 {% if stats.blocking %}
 <p class="hint" style="color:#b00">Required requirements with no file are listed in the manifest as MISSING.
 You can still build the package &mdash; a TPO usually wants the partial set plus a clear list of what is coming.</p>
@@ -27,9 +54,15 @@ You can still build the package &mdash; a TPO usually wants the partial set plus
 <input type="hidden" name="product_id" value="{{ sel_p }}">
 <input type="hidden" name="avl_id" value="{{ sel_a }}">
 <input type="hidden" name="scope" value="{{ scope }}">
-<input name="label" placeholder="Label, e.g. 'Interim IE submission'" size="34">
+<input type="hidden" name="template_id" value="{{ tmpl.id if tmpl else 0 }}">
+<label class="sub2" style="align-self:center">Revision <b>R{{ '%02d'|format(next_rev) }}</b></label>
+<input name="rev_date" type="date" value="{{ today }}" title="Revision date">
+<input name="label" placeholder="Label, e.g. 'Interim IE submission'" size="30">
 <button {% if not stats.n_files %}disabled title="Nothing to zip yet"{% endif %}>Build &amp; download ZIP</button>
 </form>
+<p class="hint">Builds <b>R{{ '%02d'|format(next_rev) }}</b> and supersedes any earlier revision for this
+product &times; TPO. The ZIP is named <code>{{ avl_name }}_{{ product_name }}_R{{ '%02d'|format(next_rev) }}_&lt;date&gt;.zip</code>
+and carries DATAROOM_SUMMARY.txt, SUMMARY.csv and MANIFEST.csv.</p>
 {% if not stats.n_files %}<p class="hint">No files are attached to this checklist yet &mdash; attach them on the
 <a href="/dataroom?product={{ sel_p }}&amp;avl={{ sel_a }}">Dataroom</a> page or via <a href="/files">Files</a>.</p>{% endif %}
 </div>
@@ -51,18 +84,21 @@ You can still build the package &mdash; a TPO usually wants the partial set plus
 
 {% if prior %}
 <div class="card"><h3>Packages already built</h3>
-<table class="list"><tr><th>Built</th><th>By</th><th>Label</th><th>Scope</th><th>Files</th><th>Gaps</th><th>Size</th><th></th><th></th></tr>
-{% for p in prior %}<tr>
+<table class="list"><tr><th>Rev</th><th>Rev date</th><th>Built</th><th>By</th><th>Label</th><th>Scope</th><th>Files</th><th>Gaps</th><th>Untracked</th><th>Size</th><th></th><th></th></tr>
+{% for p in prior %}<tr class="{{ 'inactive' if p.superseded }}">
+<td><b>{{ p.rev_code or 'R01' }}</b>{% if p.superseded %}<div class="sub2">superseded</div>{% else %}<div class="sub2">current</div>{% endif %}</td>
+<td class="sub2">{{ p.rev_date or p.created_at[:10] }}</td>
 <td class="sub2">{{ p.created_at[:16] }}</td><td class="sub2">{{ p.created_by }}</td>
 <td>{{ p.label }}</td><td class="sub2">{{ scopes.get(p.scope, p.scope) }}</td>
 <td>{{ p.n_files }}</td><td>{% if p.n_gaps %}<b class="bad">{{ p.n_gaps }}</b>{% else %}0{% endif %}</td>
+<td>{% if p.n_untracked %}<b class="bad">{{ p.n_untracked }}</b>{% else %}0{% endif %}</td>
 <td class="sub2">{{ (p.bytes / 1024)|round|int }} KB</td>
 <td><a href="/dataroom/package/{{ p.id }}/download">ZIP</a> &middot;
     <a href="/dataroom/package/{{ p.id }}/manifest.csv">manifest</a></td>
 <td><form method="post" action="/dataroom/package/{{ p.id }}/delete" class="inline"
       onsubmit="return confirm('Delete this built package? The checklist and its files are untouched.')"><button>&times;</button></form></td>
 </tr>{% endfor %}</table>
-<p class="hint">The manifest is a snapshot of what actually went out, so it stays accurate even after the
-checklist moves on.</p></div>
+<p class="hint">Revisions number per product &times; TPO; building a new one supersedes the last. The stored
+manifest is a snapshot of what actually went out, so it stays accurate even after the checklist moves on.</p></div>
 {% endif %}
 {% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}{% block body %}
+<h2>IE / DNV Technology Reviews</h2>
+<p class="hint">Independent Engineering reviews are tracked per product &mdash; a review is commissioned
+once and shown to several financiers. Kept separate from the AVL
+<a href="/workstreams">workstream templates</a>: this is a document a third party writes about the product,
+not a per-TPO dataroom checklist.</p>
+{% if request.query_params.get('err') == 'bad' %}<p class="hint" style="color:#b00">Pick a product and a template.</p>{% endif %}
+
+<div class="card"><h3>Reviews in progress</h3>
+{% if reports %}
+<table class="list"><tr><th>Report</th><th>Product</th><th>Reviewer</th><th>Status</th><th>Progress</th><th>Kickoff</th><th>Target</th></tr>
+{% for r in reports %}<tr>
+<td><a href="/ie/report/{{ r.id }}"><b>{{ r.name }}</b></a></td>
+<td>{{ r.product }} <span class="sub2">{{ r.category }}</span></td>
+<td>{{ r.reviewer }}</td><td>{{ r.status }}</td>
+<td class="barcell"><span class="bar"><i style="width:{{ (100 * r.n_done / r.n_items)|round|int if r.n_items else 0 }}%"
+  class="{{ 'full' if r.n_items and r.n_done == r.n_items else '' }}"></i></span>
+  <span class="sub2">{{ r.n_done }}/{{ r.n_items }}</span></td>
+<td class="sub2">{{ r.kickoff_date }}</td><td class="sub2">{{ r.target_date }}</td></tr>
+{% endfor %}</table>
+{% else %}<p class="hint">No reviews yet. Start one below.</p>{% endif %}
+
+<h3>Start a review</h3>
+<form method="post" action="/ie/reports/add" class="row">
+<select name="product_id" required>{% for p in products %}<option value="{{ p.id }}">{{ p.name }} &mdash; {{ p.category }}</option>{% endfor %}</select>
+<select name="template_id" required>{% for t in tmpls %}<option value="{{ t.id }}">{{ t.name }} ({{ t.n_sec }} sections, {{ t.n_items }} items)</option>{% endfor %}</select>
+<select name="reviewer">{% for rv in reviewers %}<option>{{ rv }}</option>{% endfor %}</select>
+<input name="name" placeholder="Report name (optional)" size="26">
+<input name="kickoff_date" type="date" title="Kickoff">
+<input name="target_date" type="date" title="Target">
+<button {% if not tmpls %}disabled{% endif %}>Start</button></form>
+{% if not tmpls %}<p class="hint">No IE templates yet &mdash; build one at <a href="/ie/templates">IE templates</a>.</p>{% endif %}
+</div>
+
+<div class="card"><h3>IE report templates</h3>
+<table class="list"><tr><th>Template</th><th>Reviewer</th><th>Product type</th><th>Sections</th><th>Items</th></tr>
+{% for t in tmpls %}<tr><td><a href="/ie/templates?t={{ t.id }}"><b>{{ t.name }}</b></a></td>
+<td>{{ t.reviewer }}</td><td>{{ t.category or 'Any' }}</td><td>{{ t.n_sec }}</td><td>{{ t.n_items }}</td></tr>
+{% endfor %}</table>
+<p class="hint">Manage sections and review items at <a href="/ie/templates">IE templates</a>.</p></div>
+{% endblock %}

@@ -203,6 +203,15 @@ def _migrate(c):
         if ti and col not in ti:
             c.execute(f"ALTER TABLE workstream_template_items ADD COLUMN {col} {ddl}")
             c.commit()
+    pk = [r[1] for r in c.execute("PRAGMA table_info(packages)")]
+    # Packages get a revision number and code so a TPO can be told exactly which
+    # cut they are looking at.
+    for col, ddl in (("revision", "INTEGER DEFAULT 1"), ("rev_code", "TEXT DEFAULT ''"),
+                     ("rev_date", "TEXT DEFAULT ''"), ("template_id", "INTEGER"),
+                     ("n_untracked", "INTEGER DEFAULT 0"), ("superseded", "INTEGER DEFAULT 0")):
+        if pk and col not in pk:
+            c.execute(f"ALTER TABLE packages ADD COLUMN {col} {ddl}")
+            c.commit()
     ac = [r[1] for r in c.execute("PRAGMA table_info(actions)")]
     # Actions gain a roster-backed owner and an optional link to the requirement
     # they unblock.
@@ -253,6 +262,7 @@ def init_db():
     c = conn()
     c.executescript(SCHEMA)
     c.executescript(EXTRA_SCHEMA)
+    c.executescript(IE_SCHEMA)
     _migrate(c)
     if c.execute("SELECT COUNT(*) FROM avls").fetchone()[0] == 0:
         for name, am in SEED_AVLS:
@@ -284,6 +294,7 @@ def init_db():
     _adopt_freetext_reps(c)
     _adopt_call_attendees(c)
     _adopt_action_owners(c)
+    _seed_ie(c)
     c.close()
 
 def log(user_email, action, detail=""):
@@ -351,6 +362,13 @@ CREATE TABLE IF NOT EXISTS call_attendees(
   contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
   name TEXT NOT NULL);                -- kept so history survives a delete
 CREATE INDEX IF NOT EXISTS ix_call_att ON call_attendees(call_id, side);
+CREATE TABLE IF NOT EXISTS template_revisions(
+  id INTEGER PRIMARY KEY,
+  template_id INTEGER NOT NULL REFERENCES workstream_templates(id) ON DELETE CASCADE,
+  action TEXT NOT NULL, detail TEXT DEFAULT '',
+  snapshot TEXT NOT NULL,              -- JSON of the template as it was BEFORE the change
+  actor TEXT, ts TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_trev ON template_revisions(template_id, id DESC);
 """
 
 # Starter template library, imported from the EnFin AVL Requirements Trackers.
@@ -636,3 +654,201 @@ def _adopt_action_owners(c):
     c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('action_owners_adopted', ?)",
               (datetime.datetime.now().isoformat(timespec="seconds"),))
     c.commit()
+
+
+# ---------------- workstream template undo (v17) ----------------
+# Every mutating action snapshots the template first, so any change can be walked
+# back. Undo is itself snapshotted, which makes it reversible too.
+TEMPLATE_HISTORY_LIMIT = 40
+
+def template_snapshot(c, template_id):
+    import json
+    t = c.execute("SELECT name, category, avl_id, notes, source_url, active "
+                  "FROM workstream_templates WHERE id=?", (template_id,)).fetchone()
+    if not t:
+        return None
+    items = c.execute("SELECT doc_category, workstream, obligation, description, sort_order "
+                      "FROM workstream_template_items WHERE template_id=? ORDER BY sort_order, id",
+                      (template_id,)).fetchall()
+    return json.dumps({"template": dict(t), "items": [dict(i) for i in items]})
+
+def record_revision(c, template_id, action, detail, actor):
+    """Snapshot the pre-change state. Call before mutating."""
+    snap = template_snapshot(c, template_id)
+    if snap is None:
+        return
+    c.execute("INSERT INTO template_revisions(template_id, action, detail, snapshot, actor, ts) "
+              "VALUES(?,?,?,?,?,?)",
+              (template_id, action, detail, snap, actor,
+               datetime.datetime.now().isoformat(timespec="seconds")))
+    # Keep the stack bounded; the oldest entries are the least likely to be undone.
+    c.execute("DELETE FROM template_revisions WHERE template_id=? AND id NOT IN "
+              "(SELECT id FROM template_revisions WHERE template_id=? ORDER BY id DESC LIMIT ?)",
+              (template_id, template_id, TEMPLATE_HISTORY_LIMIT))
+
+def restore_revision(c, rev_id, actor):
+    """Roll a template back to a stored snapshot. Returns (template_id, action) or None."""
+    import json
+    rev = c.execute("SELECT * FROM template_revisions WHERE id=?", (rev_id,)).fetchone()
+    if not rev:
+        return None
+    tid = rev["template_id"]
+    if not c.execute("SELECT 1 FROM workstream_templates WHERE id=?", (tid,)).fetchone():
+        return None
+    record_revision(c, tid, "undo", f"reverted '{rev['action']}' from {rev['ts'][:16]}", actor)
+    data = json.loads(rev["snapshot"])
+    t = data["template"]
+    c.execute("UPDATE workstream_templates SET name=?, category=?, avl_id=?, notes=?, "
+              "source_url=?, active=? WHERE id=?",
+              (t["name"], t["category"], t["avl_id"], t["notes"], t.get("source_url", ""),
+               t.get("active", 1), tid))
+    c.execute("DELETE FROM workstream_template_items WHERE template_id=?", (tid,))
+    for i in data["items"]:
+        c.execute("INSERT INTO workstream_template_items(template_id, doc_category, workstream, "
+                  "obligation, description, sort_order) VALUES(?,?,?,?,?,?)",
+                  (tid, i["doc_category"], i["workstream"], i["obligation"],
+                   i["description"], i["sort_order"]))
+    return tid, rev["action"]
+
+
+# ---------------- IE / DNV reports (v18) ----------------
+# Deliberately separate from workstream_templates: an IE technology review is a
+# document being written by a third party, not a dataroom checklist. Scoped to a
+# product, since a review is commissioned once and shown to several financiers.
+IE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS ie_templates(
+  id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+  reviewer TEXT DEFAULT 'DNV', category TEXT DEFAULT '',
+  notes TEXT DEFAULT '', source_url TEXT DEFAULT '', active INTEGER DEFAULT 1,
+  created_by TEXT, created_at TEXT);
+CREATE TABLE IF NOT EXISTS ie_template_sections(
+  id INTEGER PRIMARY KEY,
+  template_id INTEGER NOT NULL REFERENCES ie_templates(id) ON DELETE CASCADE,
+  code TEXT DEFAULT '', title TEXT NOT NULL, owner TEXT DEFAULT '',
+  sort_order INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS ie_template_items(
+  id INTEGER PRIMARY KEY,
+  section_id INTEGER NOT NULL REFERENCES ie_template_sections(id) ON DELETE CASCADE,
+  item_id TEXT DEFAULT '', sub_section TEXT DEFAULT '', review_item TEXT NOT NULL,
+  evidence TEXT DEFAULT '', suggested_owner TEXT DEFAULT '',
+  priority TEXT DEFAULT 'Normal', source TEXT DEFAULT '', sort_order INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS ie_reports(
+  id INTEGER PRIMARY KEY,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  template_id INTEGER REFERENCES ie_templates(id) ON DELETE SET NULL,
+  name TEXT NOT NULL, reviewer TEXT DEFAULT 'DNV', status TEXT DEFAULT 'Planning',
+  kickoff_date TEXT DEFAULT '', target_date TEXT DEFAULT '', notes TEXT DEFAULT '',
+  shared_with TEXT DEFAULT '', active INTEGER DEFAULT 1,
+  created_by TEXT, created_at TEXT);
+CREATE TABLE IF NOT EXISTS ie_report_sections(
+  id INTEGER PRIMARY KEY,
+  report_id INTEGER NOT NULL REFERENCES ie_reports(id) ON DELETE CASCADE,
+  code TEXT DEFAULT '', title TEXT NOT NULL, owner TEXT DEFAULT '',
+  owner_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  sort_order INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS ie_report_items(
+  id INTEGER PRIMARY KEY,
+  report_id INTEGER NOT NULL REFERENCES ie_reports(id) ON DELETE CASCADE,
+  section_id INTEGER NOT NULL REFERENCES ie_report_sections(id) ON DELETE CASCADE,
+  item_id TEXT DEFAULT '', sub_section TEXT DEFAULT '', review_item TEXT NOT NULL,
+  evidence TEXT DEFAULT '', priority TEXT DEFAULT 'Normal', source TEXT DEFAULT '',
+  status TEXT DEFAULT 'Not Started', owner TEXT DEFAULT '',
+  owner_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  due_date TEXT DEFAULT '', gap TEXT DEFAULT '', notes TEXT DEFAULT '',
+  sort_order INTEGER DEFAULT 0, updated_by TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS ie_template_revisions(
+  id INTEGER PRIMARY KEY,
+  template_id INTEGER NOT NULL REFERENCES ie_templates(id) ON DELETE CASCADE,
+  action TEXT NOT NULL, detail TEXT DEFAULT '', snapshot TEXT NOT NULL,
+  actor TEXT, ts TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_ie_sec ON ie_template_sections(template_id, sort_order);
+CREATE INDEX IF NOT EXISTS ix_ie_itm ON ie_template_items(section_id, sort_order);
+CREATE INDEX IF NOT EXISTS ix_ie_rsec ON ie_report_sections(report_id, sort_order);
+CREATE INDEX IF NOT EXISTS ix_ie_ritm ON ie_report_items(report_id, section_id, sort_order);
+CREATE INDEX IF NOT EXISTS ix_ie_trev ON ie_template_revisions(template_id, id DESC);
+"""
+
+IE_REVIEWERS = ["DNV", "Black & Veatch", "Leidos", "PVEL", "RETC", "Other"]
+IE_PRIORITIES = ["Critical", "High", "Normal", "Low"]
+IE_ITEM_STATUSES = ["Not Started", "In Progress", "Submitted", "Accepted", "Blocked", "N/A"]
+IE_REPORT_STATUSES = ["Planning", "Data Request", "In Review", "Draft Issued", "Final", "On Hold"]
+IE_SEED_TAG = "seed:dnv-g4ess-2026-08"
+
+def _seed_ie(c):
+    from .seed_ie import BASELINE, SRC
+    if c.execute("SELECT COUNT(*) FROM ie_templates WHERE created_by=?",
+                 (IE_SEED_TAG,)).fetchone()[0]:
+        return
+    if c.execute("SELECT 1 FROM ie_templates WHERE name=?", (BASELINE["name"],)).fetchone():
+        return
+    now = datetime.datetime.now().isoformat(timespec="seconds")
+    c.execute("INSERT INTO ie_templates(name, reviewer, category, notes, source_url, "
+              "created_by, created_at) VALUES(?,?,?,?,?,?,?)",
+              (BASELINE["name"], BASELINE["reviewer"], BASELINE["category"],
+               BASELINE["notes"], SRC, IE_SEED_TAG, now))
+    tid = c.execute("SELECT id FROM ie_templates WHERE name=?", (BASELINE["name"],)).fetchone()["id"]
+    for si, (code, title, owner, items) in enumerate(BASELINE["sections"]):
+        c.execute("INSERT INTO ie_template_sections(template_id, code, title, owner, sort_order) "
+                  "VALUES(?,?,?,?,?)", (tid, code, title, owner, si))
+        sid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        for ii, it in enumerate(items):
+            c.execute("INSERT INTO ie_template_items(section_id, item_id, sub_section, review_item, "
+                      "evidence, suggested_owner, priority, source, sort_order) "
+                      "VALUES(?,?,?,?,?,?,?,?,?)",
+                      (sid, it["item_id"], it["sub_section"], it["review_item"], it["evidence"],
+                       it["suggested_owner"], it["priority"], it["source"], ii))
+    c.commit()
+
+def ie_snapshot(c, template_id):
+    import json
+    t = c.execute("SELECT name, reviewer, category, notes, source_url, active "
+                  "FROM ie_templates WHERE id=?", (template_id,)).fetchone()
+    if not t:
+        return None
+    secs = []
+    for s in c.execute("SELECT * FROM ie_template_sections WHERE template_id=? "
+                       "ORDER BY sort_order, id", (template_id,)):
+        items = c.execute("SELECT item_id, sub_section, review_item, evidence, suggested_owner, "
+                          "priority, source, sort_order FROM ie_template_items WHERE section_id=? "
+                          "ORDER BY sort_order, id", (s["id"],)).fetchall()
+        secs.append({"code": s["code"], "title": s["title"], "owner": s["owner"],
+                     "sort_order": s["sort_order"], "items": [dict(i) for i in items]})
+    return json.dumps({"template": dict(t), "sections": secs})
+
+def ie_record_revision(c, template_id, action, detail, actor):
+    snap = ie_snapshot(c, template_id)
+    if snap is None:
+        return
+    c.execute("INSERT INTO ie_template_revisions(template_id, action, detail, snapshot, actor, ts) "
+              "VALUES(?,?,?,?,?,?)", (template_id, action, detail, snap, actor,
+                                      datetime.datetime.now().isoformat(timespec="seconds")))
+    c.execute("DELETE FROM ie_template_revisions WHERE template_id=? AND id NOT IN "
+              "(SELECT id FROM ie_template_revisions WHERE template_id=? ORDER BY id DESC LIMIT ?)",
+              (template_id, template_id, TEMPLATE_HISTORY_LIMIT))
+
+def ie_restore_revision(c, rev_id, actor):
+    import json
+    rev = c.execute("SELECT * FROM ie_template_revisions WHERE id=?", (rev_id,)).fetchone()
+    if not rev:
+        return None
+    tid = rev["template_id"]
+    if not c.execute("SELECT 1 FROM ie_templates WHERE id=?", (tid,)).fetchone():
+        return None
+    ie_record_revision(c, tid, "undo", f"reverted '{rev['action']}' from {rev['ts'][:16]}", actor)
+    data = json.loads(rev["snapshot"])
+    t = data["template"]
+    c.execute("UPDATE ie_templates SET name=?, reviewer=?, category=?, notes=?, source_url=?, "
+              "active=? WHERE id=?", (t["name"], t["reviewer"], t["category"], t["notes"],
+                                      t.get("source_url", ""), t.get("active", 1), tid))
+    c.execute("DELETE FROM ie_template_sections WHERE template_id=?", (tid,))
+    for s in data["sections"]:
+        c.execute("INSERT INTO ie_template_sections(template_id, code, title, owner, sort_order) "
+                  "VALUES(?,?,?,?,?)", (tid, s["code"], s["title"], s["owner"], s["sort_order"]))
+        sid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        for i in s["items"]:
+            c.execute("INSERT INTO ie_template_items(section_id, item_id, sub_section, review_item, "
+                      "evidence, suggested_owner, priority, source, sort_order) "
+                      "VALUES(?,?,?,?,?,?,?,?,?)",
+                      (sid, i["item_id"], i["sub_section"], i["review_item"], i["evidence"],
+                       i["suggested_owner"], i["priority"], i["source"], i["sort_order"]))
+    return tid, rev["action"]

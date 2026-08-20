@@ -190,3 +190,69 @@ after, since a technical person covering an account is a real arrangement.
 If somebody from an excluded team already holds a seat, they are still listed
 under "Currently assigned" and stay selected, so opening and saving the form
 cannot silently drop them. Once removed they disappear from the picker for good.
+
+## v17 - template undo, package revisions, dataroom summary
+Workstream templates get an undo. Every change - add, edit, delete, rename,
+rescope, retire - snapshots the template first, and the Recent changes list on
+/workstreams offers Undo on the latest or Revert to here on any earlier point.
+The undo is itself recorded, so a rollback can be rolled back. History is capped
+at 40 entries per template. Checklists already seeded are not touched; re-apply
+the template from the Dataroom page to push a change through.
+
+Dataroom packages are now revisioned. Each build takes the next revision for that
+product x TPO (R01, R02, ...) with an editable revision date, supersedes the
+previous one, and names the ZIP <AVL>_<Product>_R0n_<date>.zip. The history table
+shows revision, date, gaps and untracked counts, and which one is current.
+
+Each package carries an auto-generated DATAROOM_SUMMARY.txt plus SUMMARY.csv,
+comparing the checklist against the template it was seeded from and sorting every
+requirement into three outcomes:
+  INCLUDED          on the checklist with a document in the package
+  NO DOCUMENT       on the checklist, nothing attached
+  NOT ON CHECKLIST  in the template but never seeded here (the template changed
+                    after seeding, so the checklist is behind)
+The summary opens with the revision code, date, scope and template compared
+against, then a per-category rollup, then the full index. The package page warns
+about the third case before you build and links back to the Dataroom to re-apply
+the template in Merge mode.
+
+## v18 - IE / DNV technology reviews
+A separate /ie tab for Independent Engineering reviews, deliberately not mixed
+with the AVL workstream templates: an IE review is a document a third party
+writes about a product, not a per-TPO dataroom checklist. Its own ie_* tables
+throughout; nothing in the dataroom side changes.
+
+Reviews are scoped to a product, since a review is commissioned once and shown to
+several financiers (the AVLs it has been shared with are recorded as a note).
+Each report records reviewer (DNV, Black & Veatch, Leidos, PVEL, RETC, Other),
+status, kickoff and target dates.
+
+/ie/templates manages the section-and-item structure: add or remove whole
+sections, add/edit/remove review items, copy a template, and undo any change from
+a Recent changes list. Starting a review copies the template into the report, so
+later template edits never disturb a review already under way.
+
+Seeded from the G4 ESS DNV Technology Review workbook (Aug 2026): 12 sections,
+79 review items, each with its Item ID, sub-section, review question, required
+evidence, suggested owner, priority and DNV benchmark reference.
+
+A report page shows a per-section rollup (accepted / in progress / blocked / not
+started / critical still open / evidence files) with filters for open, critical,
+blocked and no-evidence. Each item takes a status, roster-backed owner, due date
+and gap/action, and evidence attaches inline. Download evidence pack produces a
+ZIP foldered by section with MANIFEST.csv, IE_SUMMARY.csv and IE_SUMMARY.txt,
+the last classifying every item as INCLUDED or NO EVIDENCE and listing the gaps.
+
+## v19 - IE evidence on the Files page
+The Files page now has two clearly separated blocks. "AVL dataroom" keeps the
+existing upload and download over workstream requirements, products, TPO AVLs and
+calls. "DNV / IE evidence" is its own pair of cards below it, with a report ->
+section -> review item picker for upload, and three download scopes: one review
+item, one report section, or the whole report foldered by section (the same pack
+as the button on the report page). Neither block offers the other's targets.
+
+The attachment list gains an IE filter, labels IE files as
+product / reviewer / section / item, and offers IE review items as their own
+"DNV / IE review item" group at the end of the Re-file dropdown - so a document
+can be moved between the two worlds when it genuinely serves both, without the
+pickers ever mixing them.
