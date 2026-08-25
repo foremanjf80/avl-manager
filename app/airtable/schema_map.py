@@ -30,7 +30,7 @@ BOOL_COLUMNS = {"active", "is_primary", "superseded"}
 # Free prose or JSON blobs - anything a one-line box would truncate visually.
 LONG_TEXT_COLUMNS = {"notes", "snapshot", "manifest", "detail", "description",
                      "review_item", "evidence", "source", "topics", "outcomes",
-                     "owner_due", "gap", "stored_path"}
+                     "owner_due", "gap", "stored_path", "narrative"}
 
 TYPED_TEXT_COLUMNS = {"email": "email", "website": "url", "source_url": "url",
                       "phone": "phoneNumber"}

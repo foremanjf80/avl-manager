@@ -46,11 +46,24 @@
 {% for g in groups %}
 <h3 class="grp" id="s{{ g.sec.id }}">{{ g.sec.title }}
 <span class="sub2">{{ g.done }}/{{ g.n }} accepted</span></h3>
-<form method="post" action="/ie/report/{{ r.id }}/section/{{ g.sec.id }}/save" class="inline" style="margin-bottom:6px">
+<form method="post" action="/ie/report/{{ r.id }}/section/{{ g.sec.id }}/save" style="margin-bottom:8px">
+<input type="hidden" name="only" value="{{ only }}">
+<div class="row">
 <span class="sub2">Section owner</span>
 <select name="owner_person_id"><option value="">- from template: {{ g.sec.owner or 'none' }} -</option>
 {% for p in people %}<option value="{{ p.id }}" {% if g.sec.owner_person_id==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
-<input name="owner_other" placeholder="or free text" size="18"><button>Set</button></form>
+<input name="owner_other" placeholder="or free text" size="18">
+</div>
+<textarea name="narrative" rows="5" style="width:100%;margin-top:6px;font:inherit"
+  placeholder="Section narrative &mdash; response text, findings and context for {{ g.sec.title }}. Included in the bundle.">{{ g.sec.narrative or '' }}</textarea>
+<button style="margin-top:4px">Save section</button></form>
+
+<div class="sub2" style="margin-bottom:8px">Section files:
+{% for f in sec_atts.get(g.sec.id, []) %}<a href="/files/{{ f.id }}/download">{{ f.filename }}</a>{% if not loop.last %} &middot; {% endif %}{% else %}<span class="hint">none</span>{% endfor %}
+<form method="post" action="/files/upload" enctype="multipart/form-data" class="inline" style="margin-left:8px">
+<input type="hidden" name="kind" value="ie_section"><input type="hidden" name="ref_id" value="{{ g.sec.id }}">
+<input type="hidden" name="next_url" value="/ie/report/{{ r.id }}{% if only %}?only={{ only }}{% endif %}#s{{ g.sec.id }}">
+<input type="file" name="f" required style="width:130px"><button>Attach to section</button></form></div>
 
 <table class="list"><tr><th>ID</th><th>Sub-section / review question</th><th></th><th>Status</th><th>Owner</th><th>Due</th><th>Gap / action</th><th></th></tr>
 {% for i in g['items'] %}<tr>

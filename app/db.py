@@ -224,6 +224,12 @@ def _migrate(c):
     if tt and "source_url" not in tt:
         c.execute("ALTER TABLE workstream_templates ADD COLUMN source_url TEXT DEFAULT ''")
         c.commit()
+    irs = [r[1] for r in c.execute("PRAGMA table_info(ie_report_sections)")]
+    # Long-form response text drafted per section of a live review. Lives on the
+    # report, not the template: it is this product's answer, not the question.
+    if irs and "narrative" not in irs:
+        c.execute("ALTER TABLE ie_report_sections ADD COLUMN narrative TEXT DEFAULT ''")
+        c.commit()
 
 def _seed_team(c):
     if c.execute("SELECT COUNT(*) FROM assignments").fetchone()[0]:
@@ -745,6 +751,7 @@ CREATE TABLE IF NOT EXISTS ie_report_sections(
   report_id INTEGER NOT NULL REFERENCES ie_reports(id) ON DELETE CASCADE,
   code TEXT DEFAULT '', title TEXT NOT NULL, owner TEXT DEFAULT '',
   owner_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  narrative TEXT DEFAULT '',
   sort_order INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS ie_report_items(
   id INTEGER PRIMARY KEY,

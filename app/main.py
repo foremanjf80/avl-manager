@@ -1204,7 +1204,7 @@ def backup(request: Request, user=Depends(require_admin)):
     return FileResponse(dest, filename=f"avl_backup_{stamp}.db")
 
 # ---------------- 9) attachments ----------------
-ATT_KINDS = ("product", "avl", "call", "checklist", "ie_item")
+ATT_KINDS = ("product", "avl", "call", "checklist", "ie_item", "ie_section")
 
 def _checklist_targets(c):
     """Every product x AVL x workstream row a file can be filed against."""
@@ -1934,6 +1934,7 @@ def package_delete(pkg_id: int, request: Request, user=Depends(require_editor)):
 # Kept separate from the AVL workstream templates on purpose: an IE review is a
 # document a third party writes about a product, not a per-TPO dataroom checklist.
 IE_KIND = "ie_item"
+IE_SEC_KIND = "ie_section"   # evidence filed against a whole section
 
 def _ie_progress(c, report_id):
     """Per-section rollup plus totals for one report."""
@@ -1941,6 +1942,12 @@ def _ie_progress(c, report_id):
                      (report_id,)).fetchall()
     items = c.execute("SELECT * FROM ie_report_items WHERE report_id=? ORDER BY sort_order, id",
                       (report_id,)).fetchall()
+    sec_atts = {}
+    if secs:
+        qs = ",".join("?" * len(secs))
+        for a in c.execute(f"SELECT * FROM attachments WHERE kind='{IE_SEC_KIND}' "
+                           f"AND ref_id IN ({qs}) ORDER BY id DESC", [s["id"] for s in secs]):
+            sec_atts.setdefault(a["ref_id"], []).append(a)
     atts = {}
     if items:
         qs = ",".join("?" * len(items))
@@ -1950,7 +1957,8 @@ def _ie_progress(c, report_id):
     groups, by_sec = [], {}
     for s in secs:
         by_sec[s["id"]] = {"sec": s, "items": [], "n": 0, "done": 0, "wip": 0,
-                           "blocked": 0, "open": 0, "files": 0, "crit_open": 0}
+                           "blocked": 0, "open": 0, "crit_open": 0,
+                           "files": len(sec_atts.get(s["id"], []))}
         groups.append(by_sec[s["id"]])
     for i in items:
         g = by_sec.get(i["section_id"])
@@ -1975,7 +1983,7 @@ def _ie_progress(c, report_id):
     totals = {k: sum(g[k] for g in groups) for k in
               ("n", "done", "wip", "blocked", "open", "files", "crit_open")}
     totals["pct"] = round(100 * totals["done"] / totals["n"]) if totals["n"] else 0
-    return groups, totals, atts
+    return groups, totals, atts, sec_atts
 
 @app.get("/ie", response_class=HTMLResponse)
 def ie_home(request: Request, user=Depends(require_user)):
@@ -2041,7 +2049,7 @@ def ie_report(request: Request, rid: int, only: str = "", user=Depends(require_u
     if not r:
         c.close()
         return RedirectResponse("/ie", status_code=303)
-    groups, totals, atts = _ie_progress(c, rid)
+    groups, totals, atts, sec_atts = _ie_progress(c, rid)
     if only:
         for g in groups:
             if only == "open":
@@ -2056,7 +2064,8 @@ def ie_report(request: Request, rid: int, only: str = "", user=Depends(require_u
     avls = c.execute("SELECT id, name FROM avls WHERE active=1 ORDER BY name").fetchall()
     c.close()
     return templates.TemplateResponse(request, "ie_report.html", {"user": user, "r": r,
-        "groups": groups, "totals": totals, "atts": atts, "people": people, "avls": avls,
+        "groups": groups, "totals": totals, "atts": atts, "sec_atts": sec_atts,
+        "people": people, "avls": avls,
         "item_statuses": db.IE_ITEM_STATUSES, "priorities": db.IE_PRIORITIES,
         "report_statuses": db.IE_REPORT_STATUSES, "reviewers": db.IE_REVIEWERS, "only": only})
 
@@ -2115,17 +2124,26 @@ def ie_item_save(iid: int, request: Request, status: str = Form(...),
 
 @app.post("/ie/report/{rid}/section/{sid}/save")
 def ie_section_save(rid: int, sid: int, request: Request, owner_person_id: str = Form(""),
-                    owner_other: str = Form(""), user=Depends(require_editor)):
+                    owner_other: str = Form(""), narrative: str = Form(None),
+                    only: str = Form(""), user=Depends(require_editor)):
     c = db.conn()
     oid = int(owner_person_id) if owner_person_id.strip().isdigit() and int(owner_person_id) > 0 else None
     oname = ""
     if oid:
         p = c.execute("SELECT name FROM people WHERE id=? AND active=1", (oid,)).fetchone()
         oname, oid = (p["name"], oid) if p else ("", None)
-    c.execute("UPDATE ie_report_sections SET owner=?, owner_person_id=? WHERE id=? AND report_id=?",
-              (oname or owner_other.strip(), oid, sid, rid))
+    # Blank owner inputs mean "leave it alone", not "clear it" - the narrative
+    # shares this form, so saving prose must not wipe the section owner.
+    if oname or owner_other.strip():
+        c.execute("UPDATE ie_report_sections SET owner=?, owner_person_id=? "
+                  "WHERE id=? AND report_id=?",
+                  (oname or owner_other.strip(), oid, sid, rid))
+    if narrative is not None:
+        c.execute("UPDATE ie_report_sections SET narrative=? WHERE id=? AND report_id=?",
+                  (narrative.strip(), sid, rid))
     c.commit(); c.close()
-    return RedirectResponse(f"/ie/report/{rid}", status_code=303)
+    q = f"?only={only}" if only else ""
+    return RedirectResponse(f"/ie/report/{rid}{q}#s{sid}", status_code=303)
 
 @app.post("/ie/report/{rid}/item/add")
 def ie_item_add(rid: int, request: Request, section_id: int = Form(...),
@@ -2372,7 +2390,7 @@ def ie_bundle(rid: int, request: Request, user=Depends(require_user)):
     if not r:
         c.close()
         return RedirectResponse("/ie", status_code=303)
-    groups, totals, atts = _ie_progress(c, rid)
+    groups, totals, atts, sec_atts = _ie_progress(c, rid)
     c.close()
     stamp = datetime.datetime.now().strftime("%Y%m%d")
     base = f"{_safe(r['reviewer'], 20)}_{_safe(r['product'], 40)}_IE_{stamp}"
@@ -2381,6 +2399,22 @@ def ie_bundle(rid: int, request: Request, user=Depends(require_user)):
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         for gi, g in enumerate(groups, 1):
             folder = f"{gi:02d}_{_safe(g['sec']['title'], 50)}"
+            # Section-scoped evidence sits at the top of its section folder,
+            # above the per-item subfolders.
+            for f in sec_atts.get(g["sec"]["id"], []):
+                arc = f"{folder}/_section/{_safe(f['filename'], 90)}"
+                if os.path.exists(f["stored_path"]):
+                    z.write(f["stored_path"], arc)
+                    man.append([g["sec"]["title"], "", "(section evidence)", arc])
+                else:
+                    man.append([g["sec"]["title"], "", "(section evidence)",
+                                "FILE NOT FOUND ON DISK"])
+            if g["sec"]["narrative"]:
+                z.writestr(f"{folder}/_section/NARRATIVE.txt",
+                           f"{g['sec']['title']}\n{'=' * len(g['sec']['title'])}\n\n"
+                           f"{g['sec']['narrative']}\n")
+                man.append([g["sec"]["title"], "", "(section narrative)",
+                            f"{folder}/_section/NARRATIVE.txt"])
             for it in g["items"]:
                 files = atts.get(it["id"], [])
                 summ.append([g["sec"]["title"], it["item_id"], it["sub_section"],
@@ -2401,6 +2435,13 @@ def ie_bundle(rid: int, request: Request, user=Depends(require_user)):
             for row in rows:
                 w.writerow(row)
             return buf.getvalue()
+
+        narr = [g for g in groups if g["sec"]["narrative"]]
+        if narr:
+            z.writestr("IE_NARRATIVE.txt", "\n\n".join(
+                f"{g['sec']['title']}\n{'=' * len(g['sec']['title'])}\n"
+                f"Owner: {g['sec']['owner'] or '-'}\n\n{g['sec']['narrative']}"
+                for g in narr) + "\n")
 
         z.writestr("MANIFEST.csv", csv_bytes(
             ["Section", "Item ID", "Review item", "Path in zip"], man))
