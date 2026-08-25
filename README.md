@@ -256,3 +256,77 @@ product / reviewer / section / item, and offers IE review items as their own
 "DNV / IE review item" group at the end of the Re-file dropdown - so a document
 can be moved between the two worlds when it genuinely serves both, without the
 pickers ever mixing them.
+
+## v20 - second IE baseline: G2 AC Module / Microinverter
+Adds "DNV AC Module / Microinverter Technology Review (G2 baseline)", scoped to
+AC Module: 9 sections, 69 review items, imported from the G2 Q.MI / AC Module /
+ACCB DNV Technology Review workbook (Aug 2026).
+
+  01 Company Eval                  1. Company and Business Evaluation        4
+  02 System Overview               2. System Overview                        5
+  03 PV Tech Eval                  3. PV Module Technical Evaluation         4
+  04 ACM Tech Eval                 4. AC Module Technical Evaluation         3
+  05 MI Tech Eval                  5. Microinverter Technical Evaluation    10
+  06 AC Combiner Tech Eval         6. AC Combiner Technical Evaluation       7
+  07 PV MFG Eval                   7. PV / ACM Manufacturing Evaluation     16
+  08 Inverter Manufacturing Eval   8. Inverter Manufacturing Evaluation     15
+  09 Product Support               9. Product Support, Service and Warranty   5
+
+Section titles and owners are taken from the real worksheet tabs, not the
+workbook's "00 DNV Master Index": that index still carries the G4-ESS section
+names, its counts are #REF! errors, and it lists 6 sections where the workbook
+has 9. Owners were mapped from the index rows onto the tabs by subject.
+
+Baseline seeding is now per template rather than all-or-nothing, so a database
+that already had the G4 baseline picks up this one (and any future one) on the
+next start without duplicating what is there.
+
+## Airtable backend (groundwork)
+
+SQLite is still the live store. `app/airtable/` is the groundwork for moving the
+database to Airtable: the base is built and the data verified against it first,
+so the cutover is a separate, reversible step.
+
+    app/airtable/client.py      REST client - auth, 4 req/s limiter, retries,
+                                pagination, 10-record batching, metadata API
+    app/airtable/schema_map.py  SQLite schema -> Airtable tables/fields/links
+    app/airtable/provision.py   creates or extends the base (idempotent)
+    app/airtable/migrate.py     push / pull / verify
+    tests/test_airtable_mapping.py   offline checks against the real avl.db
+
+### Setup
+Create a personal access token at https://airtable.com/create/tokens with
+`data.records:read`, `data.records:write`, `schema.bases:read` and
+`schema.bases:write`, grant it the **AVL Manager** base, then fill the
+`AIRTABLE_*` values in `.env`.
+
+    python -m app.airtable status      # what is configured
+    python -m app.airtable plan        # the mapping, no network needed
+    python -m app.airtable provision   # create/extend the base
+    python -m app.airtable push        # copy avl.db into Airtable
+    python -m app.airtable verify      # compare the two, field by field
+
+`push` is resumable: the recId for every row is cached in a local `airtable_ids`
+table, so a rerun only sends rows that have not been sent.
+
+### How the mapping works
+Airtable has no integer primary keys, so each SQLite `id` travels as a plain
+number field; that is what links are resolved through and what lets a record
+round-trip back into SQLite with its identity intact. Foreign keys become linked
+records, which is why `push` runs in two passes - records first, links second.
+
+Field types are keyed by `(table, column)`, not by column name, because the same
+name means different things in different tables: `actions.due_date` is a real
+date picker, while `ie_report_items.due_date` is a free-text box holding values
+like "End Aug". Single-select vocabularies come from the constants in `db.py`
+unioned with whatever is already stored, so nothing is dropped on push.
+
+The mapping is derived from the live SQLite schema, so a new column in `db.py`
+appears in `plan` automatically; `python -m app.airtable diff` reports what the
+base is still missing, and `provision` adds it.
+
+### Not done yet
+The app itself still reads and writes SQLite - `AVL_BACKEND` is accepted but
+`airtable` is not wired into `db.conn()`. Attachments are file paths on disk,
+not Airtable attachment fields, so `data_uploads/` still has to be migrated
+separately when the app moves off this box.

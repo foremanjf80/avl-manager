@@ -775,29 +775,35 @@ IE_REPORT_STATUSES = ["Planning", "Data Request", "In Review", "Draft Issued", "
 IE_SEED_TAG = "seed:dnv-g4ess-2026-08"
 
 def _seed_ie(c):
-    from .seed_ie import BASELINE, SRC
-    if c.execute("SELECT COUNT(*) FROM ie_templates WHERE created_by=?",
-                 (IE_SEED_TAG,)).fetchone()[0]:
-        return
-    if c.execute("SELECT 1 FROM ie_templates WHERE name=?", (BASELINE["name"],)).fetchone():
-        return
+    """Insert any shipped baseline template that is not already present.
+
+    Checked per template rather than all-or-nothing, so a database that already
+    has an earlier baseline still picks up newly shipped ones.
+    """
+    from .seed_ie import BASELINES
     now = datetime.datetime.now().isoformat(timespec="seconds")
-    c.execute("INSERT INTO ie_templates(name, reviewer, category, notes, source_url, "
-              "created_by, created_at) VALUES(?,?,?,?,?,?,?)",
-              (BASELINE["name"], BASELINE["reviewer"], BASELINE["category"],
-               BASELINE["notes"], SRC, IE_SEED_TAG, now))
-    tid = c.execute("SELECT id FROM ie_templates WHERE name=?", (BASELINE["name"],)).fetchone()["id"]
-    for si, (code, title, owner, items) in enumerate(BASELINE["sections"]):
-        c.execute("INSERT INTO ie_template_sections(template_id, code, title, owner, sort_order) "
-                  "VALUES(?,?,?,?,?)", (tid, code, title, owner, si))
-        sid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
-        for ii, it in enumerate(items):
-            c.execute("INSERT INTO ie_template_items(section_id, item_id, sub_section, review_item, "
-                      "evidence, suggested_owner, priority, source, sort_order) "
-                      "VALUES(?,?,?,?,?,?,?,?,?)",
-                      (sid, it["item_id"], it["sub_section"], it["review_item"], it["evidence"],
-                       it["suggested_owner"], it["priority"], it["source"], ii))
-    c.commit()
+    added = 0
+    for base in BASELINES:
+        if c.execute("SELECT 1 FROM ie_templates WHERE name=?", (base["name"],)).fetchone():
+            continue
+        c.execute("INSERT INTO ie_templates(name, reviewer, category, notes, source_url, "
+                  "created_by, created_at) VALUES(?,?,?,?,?,?,?)",
+                  (base["name"], base["reviewer"], base["category"], base["notes"],
+                   base.get("source_url", ""), IE_SEED_TAG, now))
+        tid = c.execute("SELECT id FROM ie_templates WHERE name=?", (base["name"],)).fetchone()["id"]
+        for si, (code, title, owner, items) in enumerate(base["sections"]):
+            c.execute("INSERT INTO ie_template_sections(template_id, code, title, owner, sort_order) "
+                      "VALUES(?,?,?,?,?)", (tid, code, title, owner, si))
+            sid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+            for ii, it in enumerate(items):
+                c.execute("INSERT INTO ie_template_items(section_id, item_id, sub_section, "
+                          "review_item, evidence, suggested_owner, priority, source, sort_order) "
+                          "VALUES(?,?,?,?,?,?,?,?,?)",
+                          (sid, it["item_id"], it["sub_section"], it["review_item"], it["evidence"],
+                           it["suggested_owner"], it["priority"], it["source"], ii))
+        added += 1
+    if added:
+        c.commit()
 
 def ie_snapshot(c, template_id):
     import json
