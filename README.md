@@ -420,3 +420,29 @@ overdue - the view a person works their own list from.
 Fixes: /dataroom/{iid} shadowed /dataroom/bulk, so the row update moved to
 /dataroom/item/{iid}/update; and adding due_date to checklist_items made the
 ORDER BY in the actions query ambiguous against actions.due_date.
+
+## v26 - the DNV/IE report as a dataroom line item
+A dataroom requirement can now point at the IE review that answers it. The IE
+report is itself a line item on every AVL dataroom, so the two were being kept in
+step by hand.
+
+On the checklist, any requirement offers a "link IE review" control - but only
+for products that actually have a review, so it never clutters the rest. A linked
+requirement shows the review live: reviewer, status and items accepted, with a
+link through to it. Only a review of that same product can be linked; anything
+else is refused rather than silently accepted. Unlinking is one click.
+
+The IE report page carries the other direction, listing the dataroom requirements
+it answers across every TPO, with links back to each checklist and acceptance
+record.
+
+Packages stop calling a linked requirement a plain gap. A requirement with no
+attached file but a linked review reads:
+  DATAROOM_SUMMARY.txt   [~] IE REVIEW ... covered by: <report> - <status>, n/m accepted
+  SUMMARY.csv            IE REVIEW - DNV Planning, 0/79 accepted
+  MANIFEST.csv           COVERED BY IE REVIEW (<report>)
+and the headline counts those separately from requirements nobody has started.
+Genuinely missing requirements still read NO DOCUMENT.
+
+Fix: the package page's template-drift warning had been rendered twice since v17,
+once spliced into the middle of the "what will be sent" sentence.

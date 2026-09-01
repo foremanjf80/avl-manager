@@ -12,6 +12,9 @@
 {% if total_req %}<span class="sub2" style="align-self:center">Required complete: <b>{{ total_done }}/{{ total_req }}</b></span>{% endif %}
 </form>
 
+{% if request.query_params.get('err') == 'iereport' %}
+<p class="hint" style="color:#b00">That IE review is for a different product, so it cannot answer this requirement.</p>
+{% endif %}
 {% if request.query_params.get('err') == 'files' %}
 <p class="hint" style="color:#b00">That requirement still has files attached. Re-file them on the Files page first, then remove it.</p>
 {% endif %}
@@ -85,6 +88,16 @@ covers the whole checklist, even when the list below is filtered.</p></div>
 <td><button>Save</button></td></form></tr>
 <tr class="attrow"><td colspan="6" class="sub2">
 {% for f in atts.get(i.id, []) %}<a href="/files/{{ f.id }}/download">{{ f.filename }}</a>{% if not loop.last %} &middot; {% endif %}{% else %}<span class="hint">no files</span>{% endfor %}
+{% if i.ie_report_id and ie_prog.get(i.ie_report_id) %}{% set ie = ie_prog[i.ie_report_id] %}
+<a href="/ie/report/{{ ie.id }}" class="ielink" title="{{ ie.name }}">{{ ie.reviewer }} review &mdash; {{ ie.status }}, {{ ie.done }}/{{ ie.n }} accepted</a>
+<form method="post" action="/dataroom/item/{{ i.id }}/link" class="inline">
+<input type="hidden" name="ie_report_id" value=""><button class="chipx" title="Unlink the IE review">&times;</button></form>
+{% elif ie_reports %}
+<form method="post" action="/dataroom/item/{{ i.id }}/link" class="inline ielinkform">
+<select name="ie_report_id" onchange="this.form.submit()">
+<option value="">{{ 'link IE review' if looks_ie(i.workstream) else '+ IE review' }}</option>
+{% for r in ie_reports %}<option value="{{ r.id }}">{{ r.reviewer }} &mdash; {{ r.name }}</option>{% endfor %}
+</select></form>{% endif %}
 </td>
 <td colspan="2"><form method="post" action="/files/upload" enctype="multipart/form-data" class="inline">
 <input type="hidden" name="kind" value="checklist"><input type="hidden" name="ref_id" value="{{ i.id }}">

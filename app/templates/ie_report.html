@@ -17,6 +17,18 @@
 <input name="notes" value="{{ r.notes }}" size="28" placeholder="Notes">
 <button>Save</button></form></div>
 
+{% if satisfies %}
+<div class="card"><h3>Answers these dataroom requirements</h3>
+<table class="list"><tr><th>TPO AVL</th><th>Product</th><th>Requirement</th><th>Checklist status</th><th></th></tr>
+{% for sf in satisfies %}<tr><td><b>{{ sf.avl_name }}</b></td><td class="sub2">{{ sf.product }}</td>
+<td>{% if sf.doc_category %}<span class="sub2">{{ sf.doc_category }}</span><br>{% endif %}{{ sf.workstream }}</td>
+<td class="sub2">{{ sf.status }}</td>
+<td><a href="/dataroom?product={{ sf.product_id }}&amp;avl={{ sf.avl_id }}" title="Open that checklist">&#8599;</a>
+<a href="/pursuit/{{ sf.avl_id }}/{{ sf.product_id }}" title="Acceptance record">&#9679;</a></td></tr>{% endfor %}</table>
+<p class="hint">A dataroom package for these will report the requirement as covered by this review rather than
+as a plain gap, and name its status.</p></div>
+{% endif %}
+
 <div class="card"><h3>Progress by section</h3>
 <table class="list track"><tr><th>Section</th><th>Owner</th><th>Accepted</th><th></th>
 <th>In progress</th><th>Blocked</th><th>Not started</th><th>Critical open</th><th>Files</th></tr>

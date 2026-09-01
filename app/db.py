@@ -201,6 +201,11 @@ def _migrate(c):
     if "due_date" not in ck:
         c.execute("ALTER TABLE checklist_items ADD COLUMN due_date TEXT DEFAULT ''")
         c.commit()
+    # The IE report is itself a line item on every AVL dataroom, so a requirement
+    # can point at the review that answers it and read its progress live.
+    if "ie_report_id" not in ck:
+        c.execute("ALTER TABLE checklist_items ADD COLUMN ie_report_id INTEGER")
+        c.commit()
     # Requirement rows carry the tracker's Document Category and obligation.
     for col, ddl in (("doc_category", "TEXT DEFAULT ''"),
                      ("obligation", "TEXT DEFAULT 'Required'")):
@@ -956,3 +961,34 @@ def ie_restore_revision(c, rev_id, actor):
                       (sid, i["item_id"], i["sub_section"], i["review_item"], i["evidence"],
                        i["suggested_owner"], i["priority"], i["source"], i["sort_order"]))
     return tid, rev["action"]
+
+
+# ---------------- dataroom <-> IE link (v26) ----------------
+# Requirement text that usually means "the IE report itself", used only to point
+# the link control at the likely row - never to link anything automatically.
+IE_REQUIREMENT_HINTS = ("dnv", "bankability", "technology review", "independent engineer",
+                        " ie ", "ie /", "ie report", "b&v", "leidos", "tdd",
+                        "technical due diligence")
+
+def looks_like_ie_requirement(text):
+    t = f" {(text or '').lower()} "
+    return any(h in t for h in IE_REQUIREMENT_HINTS)
+
+def ie_report_progress(c, report_ids):
+    """{report_id: {...}} for reports linked from a dataroom checklist."""
+    out = {}
+    ids = [i for i in set(report_ids or []) if i]
+    if not ids:
+        return out
+    qs = ",".join("?" * len(ids))
+    for r in c.execute(
+            f"SELECT r.id, r.name, r.reviewer, r.status, r.target_date, "
+            "(SELECT COUNT(*) FROM ie_report_items i WHERE i.report_id=r.id) n, "
+            "(SELECT COUNT(*) FROM ie_report_items i WHERE i.report_id=r.id "
+            " AND i.status IN ('Accepted','N/A')) done "
+            f"FROM ie_reports r WHERE r.id IN ({qs})", ids):
+        out[r["id"]] = {"id": r["id"], "name": r["name"], "reviewer": r["reviewer"],
+                        "status": r["status"], "target_date": r["target_date"],
+                        "n": r["n"], "done": r["done"],
+                        "pct": round(100 * r["done"] / r["n"]) if r["n"] else 0}
+    return out

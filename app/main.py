@@ -1038,6 +1038,10 @@ def dataroom(request: Request, product: int = 0, avl: int = 0, only: str = "",
     tmpls = db.templates_for(c, category, avl)
     atts = _checklist_atts(c, [i["id"] for i in items])
     today = datetime.date.today().isoformat()
+    ie_reports = c.execute("SELECT id, name, reviewer, status FROM ie_reports "
+                           "WHERE product_id=? AND active=1 ORDER BY id DESC",
+                           (product,)).fetchall()
+    ie_prog = db.ie_report_progress(c, [i["ie_report_id"] for i in items])
 
     # Group into the tracker's Document Categories, with a per-group rollup.
     # The filtered view must not distort the tracker, so the rollup is always
@@ -1093,7 +1097,8 @@ def dataroom(request: Request, product: int = 0, avl: int = 0, only: str = "",
         "check_statuses": db.CHECK_STATUSES, "obligations": db.OBLIGATIONS,
         "templates_": tmpls, "category": category, "atts": atts, "only": only,
         "total_req": total_req, "total_done": total_done, "track": track, "totals": totals,
-        "today": today, "people": c_people})
+        "today": today, "people": c_people, "ie_reports": ie_reports,
+        "ie_prog": ie_prog, "looks_ie": db.looks_like_ie_requirement})
 
 @app.post("/dataroom/seed")
 def dataroom_seed(request: Request, product_id: int = Form(...), avl_id: int = Form(...),
@@ -1194,6 +1199,33 @@ def dataroom_update(iid: int, request: Request, status: str = Form(...), pct: st
            avl_id=row["avl_id"], product_id=row["product_id"],
            entity="checklist", entity_id=iid)
     return RedirectResponse(f"/dataroom?product={row['product_id']}&avl={row['avl_id']}", status_code=303)
+
+@app.post("/dataroom/item/{iid}/link")
+def dataroom_link_ie(iid: int, request: Request, ie_report_id: str = Form(""),
+                     user=Depends(require_editor)):
+    """Point a dataroom requirement at the IE review that answers it."""
+    c = db.conn()
+    row = c.execute("SELECT * FROM checklist_items WHERE id=?", (iid,)).fetchone()
+    if not row:
+        c.close()
+        return RedirectResponse("/dataroom", status_code=303)
+    rid = _as_id(ie_report_id)
+    if rid:
+        # Only a review of this product can answer this product's requirement.
+        ok = c.execute("SELECT name FROM ie_reports WHERE id=? AND product_id=? AND active=1",
+                       (rid, row["product_id"])).fetchone()
+        if not ok:
+            c.close()
+            return RedirectResponse(f"/dataroom?product={row['product_id']}&avl={row['avl_id']}"
+                                    "&err=iereport", status_code=303)
+    c.execute("UPDATE checklist_items SET ie_report_id=?, updated_by=?, updated_at=? WHERE id=?",
+              (rid, user["email"], now(), iid))
+    c.commit(); c.close()
+    db.log(user["email"], "dataroom:ie-link",
+           f"{row['workstream']} {'-> IE report #' + str(rid) if rid else 'unlinked'}",
+           avl_id=row["avl_id"], product_id=row["product_id"], entity="checklist", entity_id=iid)
+    return RedirectResponse(f"/dataroom?product={row['product_id']}&avl={row['avl_id']}",
+                            status_code=303)
 
 @app.post("/dataroom/bulk")
 def dataroom_bulk(request: Request, product_id: int = Form(...), avl_id: int = Form(...),
@@ -1939,6 +1971,7 @@ def _package_contents(c, product_id, avl_id, scope):
     rows = c.execute("SELECT * FROM checklist_items WHERE product_id=? AND avl_id=? " + frag +
                      "ORDER BY sort_order, id", [product_id, avl_id] + extra).fetchall()
     atts = _checklist_atts(c, [r["id"] for r in rows])
+    ie_prog = db.ie_report_progress(c, [r["ie_report_id"] for r in rows])
     groups, seen = [], {}
     for r in rows:
         key = r["doc_category"] or "Other"
@@ -1946,7 +1979,8 @@ def _package_contents(c, product_id, avl_id, scope):
             seen[key] = {"name": key, "items": []}
             groups.append(seen[key])
         files = atts.get(r["id"], [])
-        seen[key]["items"].append({"row": r, "files": files, "gap": not files})
+        seen[key]["items"].append({"row": r, "files": files, "gap": not files,
+                                   "ie": ie_prog.get(r["ie_report_id"])})
     return groups
 
 def _dominant_template(c, product_id, avl_id):
@@ -1972,12 +2006,16 @@ def _template_drift(c, product_id, avl_id, template_id):
         (template_id,)) if r["workstream"] not in have]
 
 def _package_stats(groups):
-    n_reqs = sum(len(g["items"]) for g in groups)
-    n_files = sum(len(i["files"]) for g in groups for i in g["items"])
-    n_gaps = sum(1 for g in groups for i in g["items"] if i["gap"])
-    blocking = sum(1 for g in groups for i in g["items"]
-                   if i["gap"] and i["row"]["obligation"] == "Required")
-    return {"n_reqs": n_reqs, "n_files": n_files, "n_gaps": n_gaps, "blocking": blocking}
+    items = [i for g in groups for i in g["items"]]
+    n_gaps = sum(1 for i in items if i["gap"])
+    # A gap covered by a linked IE review is being worked somewhere the reader can
+    # check, which is a different thing from nobody having started.
+    covered = sum(1 for i in items if i["gap"] and i.get("ie"))
+    return {"n_reqs": len(items),
+            "n_files": sum(len(i["files"]) for i in items),
+            "n_gaps": n_gaps, "ie_covered": covered,
+            "blocking": sum(1 for i in items
+                            if i["gap"] and not i.get("ie") and i["row"]["obligation"] == "Required")}
 
 @app.get("/dataroom/package", response_class=HTMLResponse)
 def package_preview(request: Request, product: int = 0, avl: int = 0, scope: str = "all",
@@ -2050,10 +2088,15 @@ def package_build(request: Request, product_id: int = Form(...), avl_id: int = F
             for item in g["items"]:
                 r = item["row"]
                 if item["gap"]:
+                    ie = item.get("ie")
+                    res = (f"IE REVIEW - {ie['reviewer']} {ie['status']}, "
+                           f"{ie['done']}/{ie['n']} accepted") if ie else "NO DOCUMENT"
                     summary_rows.append([g["name"], r["workstream"], r["obligation"], r["status"],
-                                         0, "NO DOCUMENT"])
+                                         0, res])
                     manifest_rows.append([g["name"], r["workstream"], r["obligation"],
-                                          r["status"], "", "MISSING - no file attached"])
+                                          r["status"], "",
+                                          f"COVERED BY IE REVIEW ({ie['name']})" if ie
+                                          else "MISSING - no file attached"])
                     continue
                 sub = f"{folder}/{_safe(r['workstream'], 60)}"
                 got = 0
@@ -2111,7 +2154,9 @@ def package_build(request: Request, product_id: int = Form(...), avl_id: int = F
             L.append(f"Label            : {label.strip()}")
         L += ["",
               f"{stats['n_files']} document(s) included against {stats['n_reqs']} requirement(s) in scope.",
-              f"{stats['n_gaps']} requirement(s) have no document ({stats['blocking']} of them Required).",
+              f"{stats['n_gaps']} requirement(s) have no document "
+              f"({stats['ie_covered']} of those covered by a linked IE review, "
+              f"{stats['blocking']} Required and uncovered).",
               f"{len(drift)} template requirement(s) are not on this checklist yet.", "",
               "BY DOCUMENT CATEGORY", "-" * 60,
               f"{'Category':<38}{'Reqs':>5}{'Incl':>6}{'NoDoc':>7}{'NotTrk':>7}"]
@@ -2126,8 +2171,12 @@ def package_build(request: Request, product_id: int = Form(...), avl_id: int = F
             L.append(f"{gi:02d}. {g['name']}  -  {got} file(s)")
             for item in g["items"]:
                 r = item["row"]
-                mark = "  [ ] NO DOCUMENT" if item["gap"] else "  [x]"
+                ie = item.get("ie")
+                mark = ("  [~] IE REVIEW" if ie else "  [ ] NO DOCUMENT") if item["gap"] else "  [x]"
                 L.append(f"    {mark} ({r['obligation']}, {r['status']}) {r['workstream']}")
+                if ie:
+                    L.append(f"          covered by: {ie['name']} - {ie['status']}, "
+                             f"{ie['done']}/{ie['n']} items accepted")
                 for f in item["files"]:
                     L.append(f"          - {f['filename']}")
             L.append("")
@@ -2329,8 +2378,15 @@ def ie_report(request: Request, rid: int, only: str = "", user=Depends(require_u
                 g["items"] = [i for i in g["items"] if not atts.get(i["id"])]
     people = c.execute("SELECT id, name, org FROM people WHERE active=1 ORDER BY name").fetchall()
     avls = c.execute("SELECT id, name FROM avls WHERE active=1 ORDER BY name").fetchall()
+    # The other direction of the dataroom link: which TPO requirements this answers.
+    satisfies = c.execute(
+        "SELECT ci.id, ci.workstream, ci.doc_category, ci.status, ci.avl_id, ci.product_id, "
+        "a.name AS avl_name, p.name AS product FROM checklist_items ci "
+        "JOIN avls a ON a.id=ci.avl_id JOIN products p ON p.id=ci.product_id "
+        "WHERE ci.ie_report_id=? ORDER BY a.name", (rid,)).fetchall()
     c.close()
     return templates.TemplateResponse(request, "ie_report.html", {"user": user, "r": r,
+        "satisfies": satisfies,
         "groups": groups, "totals": totals, "atts": atts, "sec_atts": sec_atts,
         "people": people, "avls": avls,
         "item_statuses": db.IE_ITEM_STATUSES, "priorities": db.IE_PRIORITIES,

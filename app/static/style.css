@@ -140,3 +140,8 @@ select.cs-Submitted{background:#BDD7EE}select.cs-Accepted{background:#C6EFCE;fon
 form.bulkrow{margin:4px 0 6px;padding:4px 8px;background:#f7f9fc;border-radius:5px}
 form.bulkrow select,form.bulkrow input{font-size:12px;padding:2px 4px}
 form.bulkrow button{padding:3px 9px;font-size:11.5px}
+a.ielink{font-size:11px;text-decoration:none;background:#e0f2f1;color:#0f5e58;border:1px solid #bfe3e0;
+  border-radius:10px;padding:1px 7px;margin-left:6px;white-space:nowrap}
+a.ielink:hover{background:#0f5e58;color:#fff}
+form.ielinkform select{font-size:11px;padding:1px 4px;color:#5a6a7a;border:1px dashed #a9b6c4;
+  border-radius:10px;background:#fff;max-width:190px}
