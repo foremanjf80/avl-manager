@@ -24,14 +24,16 @@
     <select name="avl_id" class="avlpick"><option value="">- none -</option>
       {% for a in avls %}<option value="{{ a.id }}" {% if (r and r.avl_id==a.id) or (not r and a.id==sel_a) %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select></label>
   <label>Product
-    <select name="product_id" class="prodpick"><option value="">- none -</option></select></label>
+    <select name="product_id" class="prodpick"><option value="">- none -</option>
+    {% for p in products %}<option value="{{ p.id }}">{{ p.name }} &mdash; {{ p.category }}</option>{% endfor %}</select>
+    <span class="sub2 liveStatus"></span></label>
   <label>Workstream requirement
-    <select name="checklist_item_id" class="reqpick"><option value="">- none -</option></select>
-    <span class="sub2">Optional. Picking one sets the TPO and product from the checklist.</span></label>
+    <select name="requirement" class="reqpick"><option value="">- none -</option></select>
+    <span class="sub2 reqnote">Optional. Requirements load once a TPO and product are chosen.</span></label>
 </div>
 <div class="row"><button>{{ submit }}</button>
 {% if r %}<a href="/actions?show={{ show }}&amp;avl={{ sel_a }}" class="sub2" style="align-self:center">Cancel</a>{% endif %}</div>
-<script type="application/json" class="presel">{{ {'avl': (r.avl_id if r else sel_a) or '', 'product': (r.product_id if r else '') or '', 'req': (r.checklist_item_id if r else '') or ''}|tojson }}</script>
+<script type="application/json" class="presel">{{ {'avl': (r.avl_id if r else sel_a) or '', 'product': (r.product_id if r else '') or '', 'req': ('ck:' ~ r.checklist_item_id) if (r and r.checklist_item_id) else ''}|tojson }}</script>
 </form>
 {% endmacro %}
 
@@ -45,6 +47,11 @@
 {% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel_a %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
 <select name="owner" onchange="this.form.submit()"><option value="0">Any owner</option>
 {% for p in people %}<option value="{{ p.id }}" {% if p.id==sel_o %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+<select name="listing" onchange="this.form.submit()">
+<option value="">Any listing status</option>
+{% for k, lbl in [('unlisted','On products not yet listed'), ('listed','On listed products'),
+                  ('conditional','On conditional listings'), ('noproduct','No product attached')] %}
+<option value="{{ k }}" {% if sel_l==k %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select>
 <span class="sub2" style="align-self:center">{{ rows|length }} item{{ '' if rows|length==1 else 's' }}</span>
 </form>
 
@@ -55,6 +62,8 @@
 <td class="wrap">{{ r.description }}</td>
 <td>{{ r.owner_name or r.owner or '-' }}</td>
 <td class="sub2">{% if r.avl_name %}<b>{{ r.avl_name }}</b>{% endif %}
+{% if r.product_name %}<div>{{ r.product_name }}
+{% if r.avl_name %}<span class="ls ls-{{ (r.listing_status or 'Not tracked')|replace(' ','')|replace(',','')|replace('/','') }}">{{ r.listing_status or 'not tracked' }}</span>{% endif %}</div>{% endif %}
 {% if r.workstream %}<div>{{ r.product_name }} &mdash; {% if r.doc_category %}{{ r.doc_category }}: {% endif %}{{ r.workstream }}
 <a href="/dataroom?product={{ r.product_id }}&amp;avl={{ r.avl_id }}" title="Open on the checklist">&#8599;</a>
 <span class="sub2">[{{ r.req_status }}]</span></div>{% endif %}</td>
@@ -71,39 +80,85 @@
 {% endif %}
 {% else %}<tr><td colspan="8" class="hint">Nothing here.</td></tr>{% endfor %}</table>
 
-<p class="hint">Red rows are overdue. Linking an action to a workstream requirement records what the
-action actually unblocks &mdash; the arrow jumps to that row on the <a href="/dataroom">Dataroom</a> checklist.</p>
+<p class="hint">Red rows are overdue. Any active product can be picked against any TPO, whether or not it
+is listed there &mdash; the badge under the product shows where it stands, so chasing a listing and chasing a
+condition on an existing listing stay tellable apart. Workstream requirements are only offered once that
+product &times; TPO has a seeded <a href="/dataroom">Dataroom</a> checklist; linking one records what the
+action unblocks and the arrow jumps straight to it.</p>
 
 <script>
 const REQS = {{ tree|tojson }};
+const LISTINGS = {{ listings|tojson }};
+const LISTED = {{ listed_statuses|list|tojson }};
 document.querySelectorAll('form.actform').forEach(f => {
   const avlSel=f.querySelector('.avlpick'), prodSel=f.querySelector('.prodpick'),
         reqSel=f.querySelector('.reqpick');
   const pre=JSON.parse(f.querySelector('.presel').textContent||'{}');
   function opt(v,t){const o=document.createElement('option');o.value=v;o.textContent=t;return o;}
   function fillProd(keep){
+    // Products are not filtered by whether a checklist exists - only requirements are.
     const want = keep ? String(pre.product||'') : '';
-    prodSel.innerHTML=''; prodSel.appendChild(opt('','- none -'));
-    const byProd = REQS[avlSel.value] || {};
-    Object.keys(byProd).forEach(pid => {
-      const o = opt(pid, byProd[pid].name);
-      if (pid === want) o.selected = true;
-      prodSel.appendChild(o);
-    });
-    fillReq(keep);
+    if (want) Array.from(prodSel.options).forEach(o => { if (o.value === want) o.selected = true; });
+    fillReq(keep); showStatus();
+  }
+  function showStatus(){
+    const el = f.querySelector('.liveStatus');
+    if (!el) return;
+    const a = avlSel.value, p = prodSel.value;
+    if (!a || !p) { el.textContent = ''; return; }
+    const st = LISTINGS[a + ':' + p];
+    el.textContent = st ? 'Currently: ' + st : 'Not tracked at this TPO yet';
+    el.className = 'sub2 liveStatus' + (LISTED.includes(st) ? ' ok' : '');
   }
   function fillReq(keep){
-    const want = keep ? String(pre.req||'') : '';
-    reqSel.innerHTML=''; reqSel.appendChild(opt('','- none -'));
-    const entry = (REQS[avlSel.value]||{})[prodSel.value];
-    (entry ? entry.items : []).forEach(it => {
-      const o = opt(it.id, (it.cat ? it.cat + ': ' : '') + it.ws + ' [' + it.status + ']');
-      if (String(it.id) === want) o.selected = true;
-      reqSel.appendChild(o);
-    });
+    // Loaded on demand: every product x TPO can offer a template's worth of
+    // requirements, which is far too much to embed in the page up front.
+    const want = keep ? String(pre.req || '') : '';
+    const note = f.querySelector('.reqnote');
+    reqSel.innerHTML = ''; reqSel.appendChild(opt('', '- none -'));
+    if (!avlSel.value || !prodSel.value) {
+      if (note) note.textContent = 'Optional. Requirements load once a TPO and product are chosen.';
+      return;
+    }
+    reqSel.disabled = true;
+    fetch('/actions/requirements?avl_id=' + avlSel.value + '&product_id=' + prodSel.value)
+      .then(r => r.json())
+      .then(d => {
+        reqSel.innerHTML = ''; reqSel.appendChild(opt('', '- none -'));
+        if (d.tracked.length) {
+          const g = document.createElement('optgroup');
+          g.label = 'On this checklist';
+          d.tracked.forEach(i => {
+            const o = opt(i.value, i.label + ' [' + i.status + ']');
+            if (i.value === want) o.selected = true;
+            g.appendChild(o);
+          });
+          reqSel.appendChild(g);
+        }
+        if (d.template.length) {
+          const g = document.createElement('optgroup');
+          g.label = 'Not tracked yet - from ' + d.template_name;
+          d.template.forEach(i => {
+            const o = opt(i.value, i.label + ' (' + i.obligation + ')');
+            if (i.value === want) o.selected = true;
+            g.appendChild(o);
+          });
+          reqSel.appendChild(g);
+        }
+        reqSel.disabled = false;
+        if (note) {
+          note.textContent = d.tracked.length || d.template.length
+            ? d.tracked.length + ' tracked, ' + d.template.length +
+              ' more available from the template. Picking an untracked one starts tracking it.'
+            : 'No template covers this product type yet - build one under Workstreams.';
+        }
+      })
+      .catch(() => { reqSel.disabled = false;
+        if (note) note.textContent = 'Could not load requirements.'; });
   }
-  avlSel.addEventListener('change', () => fillProd(false));
-  prodSel.addEventListener('change', () => fillReq(false));
+
+  avlSel.addEventListener('change', () => { fillProd(false); showStatus(); });
+  prodSel.addEventListener('change', () => { fillReq(false); showStatus(); });
   fillProd(true);
 });
 </script>

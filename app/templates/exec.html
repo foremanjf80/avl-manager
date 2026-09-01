@@ -26,6 +26,10 @@
 </div>
 <div class="card"><h3>Listed coverage by TPO (active products)</h3>
 <table class="list"><tr><th>TPO AVL</th><th>Listed</th><th>Tracked</th><th>Coverage</th></tr>
-{% for r in listed_by_avl %}<tr><td><b>{{ r.name }}</b></td><td>{{ r.listed }}</td><td>{{ r.total }}</td>
-<td>{{ (100*r.listed/r.total)|round(0)|int if r.total else 0 }}%</td></tr>{% endfor %}</table></div>
+{% for r in listed_by_avl %}<tr><td><b>{{ r.name }}</b></td>
+<td>{{ r.listed }}{% if r.conditional %} <span class="chip cond" title="{{ r.conditional }} of these carry conditions">{{ r.conditional }} cond.</span>{% endif %}</td>
+<td>{{ r.total }}</td>
+<td>{{ (100*r.listed/r.total)|round(0)|int if r.total else 0 }}%</td></tr>{% endfor %}</table>
+<p class="hint">"Listed" counts both clean and conditional listings; the chip shows how many carry
+conditions still to be closed out.</p></div>
 {% endblock %}

@@ -1,0 +1,98 @@
+{% extends "base.html" %}{% block body %}
+<div class="pursuit">
+<div class="row" style="justify-content:space-between">
+<h2>{{ p.name }} <span class="sub2">at</span> {{ a.name }}</h2>
+<span><a class="btn small" href="/dataroom?product={{ p.id }}&amp;avl={{ a.id }}">Dataroom</a>
+<a class="btn small" href="/dataroom/package?product={{ p.id }}&amp;avl={{ a.id }}">Package</a></span></div>
+<p class="hint"><a href="/acceptance">All pursuits</a> &middot; {{ p.category }} &middot;
+{{ p.lifecycle }}{% if p.launch_status %} ({{ p.launch_status }}){% endif %}</p>
+
+<div class="kpis">
+<div class="kpi {{ 'win' if l.status in ('Listed','Listed, Conditional') }}">
+  <div class="n" style="font-size:17px">{{ l.status }}</div>listing status
+  {% if l.updated_at %}<div class="sub2">since {{ l.updated_at[:10] }}</div>{% endif %}</div>
+<div class="kpi {{ 'win' if d.rd.ready }}"><div class="n">{% if d.rd.req %}{{ d.rd.done }}/{{ d.rd.req }}{% else %}-{% endif %}</div>
+  required requirements{% if d.rd.ready %}<div class="sub2">ready to submit</div>{% endif %}</div>
+<div class="kpi {{ 'risk' if d.rd.nofile_req }}"><div class="n">{{ d.rd.nofile_req }}</div>required with no document</div>
+<div class="kpi {{ 'risk' if d.overdue_actions }}"><div class="n">{{ d.open_actions }}</div>
+  open actions{% if d.overdue_actions %}<div class="sub2">{{ d.overdue_actions }} overdue</div>{% endif %}</div>
+{% if d.pkg %}<div class="kpi"><div class="n" style="font-size:17px">{{ d.pkg.rev_code }}</div>
+  last package sent<div class="sub2">{{ d.pkg.rev_date }}{% if d.pkg.n_gaps %} &middot; {{ d.pkg.n_gaps }} gaps{% endif %}</div></div>{% endif %}
+</div>
+
+{% if l.condition %}<div class="card" style="border-color:#e8c98c;background:#fffdf7">
+<h3>Condition on this listing</h3><p>{{ l.condition }}</p></div>{% endif %}
+
+<div class="card"><h3>Pursuit</h3>
+<form method="post" action="/pursuit/{{ a.id }}/{{ p.id }}/save">
+<div class="pgrid">
+<label>Owner
+  <select name="owner_person_id"><option value="">- {{ l.owner or 'unassigned' }} -</option>
+  {% for pe in people %}<option value="{{ pe.id }}" {% if l.owner_person_id==pe.id %}selected{% endif %}>{{ pe.name }}</option>{% endfor %}</select>
+  <input name="owner_other" placeholder="or someone off-roster" size="16"></label>
+<label>Target listing date <input name="target_date" type="date" value="{{ l.target_date }}"></label>
+<label>Dataroom submitted <input name="submitted_at" type="date" value="{{ l.submitted_at }}"></label>
+<label>Priority <select name="priority">{% for pr in priorities %}<option {% if l.priority==pr %}selected{% endif %}>{{ pr }}</option>{% endfor %}</select></label>
+</div>
+<div class="pgrid" style="margin-top:10px;grid-template-columns:1fr 1fr 1fr">
+<label>Next milestone <input name="next_milestone" value="{{ l.next_milestone }}" placeholder="e.g. DNV draft 1 to EnFin"></label>
+<label>Risk / blocker <input name="risk" value="{{ l.risk }}" placeholder="Name the thing in the way"></label>
+<label>Condition (if conditionally listed) <input name="condition" value="{{ l.condition }}" placeholder="What has to be closed out"></label>
+</div>
+<div class="row"><button>Save</button>
+<span class="sub2" style="align-self:center">Listing status itself is set on the
+<a href="/">Dashboard</a> matrix.</span></div></form></div>
+
+<div class="cols3">
+<div class="card"><h3>Outstanding required requirements</h3>
+{% if gaps %}<table class="list"><tr><th>Requirement</th><th>Status</th><th>Owner</th></tr>
+{% for g in gaps %}<tr><td>{% if g.doc_category %}<span class="sub2">{{ g.doc_category }}</span><br>{% endif %}{{ g.workstream }}</td>
+<td><span class="ak ak-{{ 'action' if g.status=='Blocked' else 'dataroom' }}">{{ g.status }}</span></td>
+<td class="sub2">{{ g.owner }}</td></tr>{% endfor %}</table>
+<p class="hint"><a href="/dataroom?product={{ p.id }}&amp;avl={{ a.id }}">Work the checklist &rarr;</a></p>
+{% elif d.rd.req %}<p class="hint">Every required requirement is done. <a href="/dataroom/package?product={{ p.id }}&amp;avl={{ a.id }}">Build the package &rarr;</a></p>
+{% else %}<p class="hint">No checklist seeded yet. <a href="/dataroom?product={{ p.id }}&amp;avl={{ a.id }}">Apply a template &rarr;</a></p>{% endif %}</div>
+
+<div class="card"><h3>Actions</h3>
+{% if acts %}<table class="list"><tr><th>Due</th><th>Action</th><th>Owner</th><th></th></tr>
+{% for ac in acts %}<tr class="{{ 'overdue' if ac.status=='Open' and ac.due_date and ac.due_date < today }}">
+<td class="sub2 nowrap">{{ ac.due_date or '-' }}</td>
+<td>{{ ac.description }}{% if ac.workstream %}<div class="sub2">{{ ac.workstream }}</div>{% endif %}</td>
+<td class="sub2">{{ ac.owner_name or ac.owner or '-' }}</td>
+<td class="sub2">{{ ac.status }}</td></tr>{% endfor %}</table>{% else %}<p class="hint">No actions logged.</p>{% endif %}
+<p class="hint"><a href="/actions?avl={{ a.id }}">All actions for {{ a.name }} &rarr;</a></p></div>
+
+<div class="card"><h3>Who and when</h3>
+{% if contacts %}<p class="sub2"><b>TPO contacts</b></p>
+<table class="list">{% for ct in contacts %}<tr><td>{{ ct.name }}{% if ct.is_primary %} <span class="chip primary">POC</span>{% endif %}
+<div class="sub2">{{ ct.role }}</div></td><td class="sub2">{% if ct.email %}<a href="mailto:{{ ct.email }}">{{ ct.email }}</a>{% endif %}</td></tr>{% endfor %}</table>
+{% else %}<p class="hint">No contacts recorded for {{ a.name }}.</p>{% endif %}
+{% if calls %}<p class="sub2" style="margin-top:10px"><b>Recent calls</b></p>
+<table class="list">{% for cl in calls %}<tr><td class="sub2 nowrap">{{ cl.call_date }}</td>
+<td>{{ cl.call_type }}<div class="sub2">{{ (cl.topics or '')[:70] }}</div></td></tr>{% endfor %}</table>{% endif %}
+<p class="hint"><a href="/contacts?avl={{ a.id }}">Contacts</a> &middot; <a href="/calls?avl={{ a.id }}">Call log</a></p></div>
+</div>
+
+<div class="cols">
+<div class="card"><h3>Packages sent</h3>
+{% if packages %}<table class="list"><tr><th>Rev</th><th>Date</th><th>Files</th><th>Gaps</th><th></th></tr>
+{% for pk in packages %}<tr class="{{ 'inactive' if pk.superseded }}"><td><b>{{ pk.rev_code }}</b></td>
+<td class="sub2">{{ pk.rev_date }}</td><td>{{ pk.n_files }}</td>
+<td>{% if pk.n_gaps %}<b class="bad">{{ pk.n_gaps }}</b>{% else %}0{% endif %}</td>
+<td><a href="/dataroom/package/{{ pk.id }}/download">ZIP</a></td></tr>{% endfor %}</table>
+{% else %}<p class="hint">Nothing sent yet.</p>{% endif %}
+{% if d.ie %}<p class="sub2" style="margin-top:10px"><b>IE review for this product</b></p>
+<p><a href="/ie/report/{{ d.ie.id }}">{{ d.ie.name }}</a> &mdash; {{ d.ie.status }},
+{{ d.ie.done }}/{{ d.ie.n }} items accepted</p>{% endif %}</div>
+
+<div class="card"><h3>Recent activity</h3>
+<table class="list">{% for r in feed %}<tr>
+<td class="sub2 nowrap">{{ r.ts[:16]|replace('T',' ') }}</td>
+<td><span class="ak ak-{{ r.kind }}">{{ types[r.kind][0] if r.kind in types else r.kind }}</span></td>
+<td>{% if r.to %}<b>{{ r['from'] or '-' }} &rarr; {{ r.to }}</b>{% else %}{{ r.detail }}{% endif %}</td>
+<td class="sub2">{{ r.who }}</td></tr>
+{% else %}<tr><td class="hint">Nothing recorded for this pairing yet.</td></tr>{% endfor %}</table>
+<p class="hint"><a href="/activity?avl={{ a.id }}&amp;product={{ p.id }}">Full activity &rarr;</a></p></div>
+</div>
+</div>
+{% endblock %}

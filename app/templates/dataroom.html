@@ -1,5 +1,6 @@
 {% extends "base.html" %}{% block body %}
-<h2>Dataroom / AVL Requirements Checklist</h2>
+<div class="row" style="justify-content:space-between"><h2>Dataroom / AVL Requirements Checklist</h2>
+<a class="btn small" href="/dataroom/queue">Requirement queue</a></div>
 <form method="get" action="/dataroom" class="row" style="margin-bottom:10px">
 <select name="product" onchange="this.form.submit()">{% for p in products %}<option value="{{ p.id }}" {% if p.id==sel_p %}selected{% endif %}>{{ p.name }} &mdash; {{ p.category }}</option>{% endfor %}</select>
 <b>@</b>
@@ -60,16 +61,25 @@ covers the whole checklist, even when the list below is filtered.</p></div>
 {% for g in groups %}
 <h3 class="grp" id="g{{ loop.index }}">{{ g.name }}
 <span class="sub2">{{ g['items']|length }} requirement{{ '' if g['items']|length==1 else 's' }}</span></h3>
-<table class="list"><tr><th>Requirement</th><th></th><th>Status</th><th>%</th><th>ETA</th><th>Owner</th><th>Notes</th><th></th></tr>
-{% for i in g['items'] %}<tr>
+<form method="post" action="/dataroom/bulk" class="row bulkrow">
+<input type="hidden" name="product_id" value="{{ sel_p }}"><input type="hidden" name="avl_id" value="{{ sel_a }}">
+<input type="hidden" name="doc_category" value="{{ g.name if g.name != 'Other' else '' }}">
+<span class="sub2" style="align-self:center">Set for the whole category:</span>
+<select name="owner"><option value="">- owner -</option>{% for pe in people %}<option>{{ pe.name }}</option>{% endfor %}</select>
+<input name="due_date" type="date" title="Due date for all in this category">
+<select name="status"><option value="">- status -</option>{% for st in check_statuses %}<option>{{ st }}</option>{% endfor %}</select>
+<button>Apply to all</button></form>
+<table class="list"><tr><th>Requirement</th><th></th><th>Status</th><th>%</th><th>Due</th><th>Owner</th><th>Notes</th><th></th></tr>
+{% for i in g['items'] %}<tr class="{{ 'overdue' if i.due_date and i.due_date < today and i.status not in ('Complete','Submitted','Accepted') }}">
 <td><b>{{ i.workstream }}</b>
 {% if i.description %}<div class="sub2">{{ i.description }}</div>{% endif %}
 <div class="sub2">{{ i.updated_by }} {{ i.updated_at[:10] if i.updated_at }}</div></td>
 <td><span class="ob ob-{{ i.obligation }}">{{ i.obligation[:4] }}</span></td>
-<form method="post" action="/dataroom/{{ i.id }}">
+<form method="post" action="/dataroom/item/{{ i.id }}/update">
 <td><select name="status" class="cs-{{ i.status|replace(' ','') }}">{% for st in check_statuses %}<option {% if i.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select></td>
 <td><input name="pct" value="{{ i.pct }}" size="3"></td>
-<td><input name="eta" value="{{ i.eta }}" size="8"></td>
+<td><input name="due_date" type="date" value="{{ i.due_date }}" title="Due date">
+<input name="eta" value="{{ i.eta }}" size="7" placeholder="or free text" title="Loose ETA, e.g. End Aug"></td>
 <td><input name="owner" value="{{ i.owner }}" size="10"></td>
 <td><input name="notes" value="{{ i.notes }}" size="34"></td>
 <td><button>Save</button></td></form></tr>

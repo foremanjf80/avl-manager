@@ -4,11 +4,19 @@
 <table class="list"><tr><th>Name</th><th>Category</th><th>Prod/Tech reps</th><th>Lifecycle / target</th><th></th></tr>
 {% for p in products %}<tr class="{{ 'inactive' if not p.active }}">
 <td>{{ p.name }}</td><td>{{ p.category }}</td>
-<td><form method="post" action="/products/{{ p.id }}/reps" class="inline">
-<select name="person_ids" multiple size="3" class="rosterpick">
-{% for label, folk in prod_opts.get(p.id, []) %}<optgroup label="{{ label }}">
-{% for r in folk %}<option value="{{ r.id }}" {% if r.id in holders['product'].get(p.id, []) %}selected{% endif %}>{{ r.name }}{% if label != 'Technical teams' %} &mdash; {{ r.org or 'unassigned' }}{% endif %}</option>{% endfor %}
-</optgroup>{% endfor %}</select><button>Save</button></form></td>
+<td class="repcell"><div class="repwrap">
+{% for r in prod_reps.get(p.id, []) %}<form method="post" action="/products/{{ p.id }}/reps/remove" class="chipform">
+<input type="hidden" name="person_id" value="{{ r.id }}">
+<span class="chip person">{{ r.name }}<button class="chipx" title="Remove {{ r.name }} from {{ p.name }}">&times;</button></span></form>
+{% else %}<span class="hint">none assigned</span>{% endfor %}
+{% if prod_avail.get(p.id) %}
+<form method="post" action="/products/{{ p.id }}/reps/add" class="inline addrep">
+<select name="person_id" onchange="this.form.submit()">
+<option value="">+ add rep</option>
+{% for lbl, folk in prod_avail[p.id] %}<optgroup label="{{ lbl }}">
+{% for r in folk %}<option value="{{ r.id }}">{{ r.name }}{% if lbl != 'Technical teams' %} &mdash; {{ r.org or 'unassigned' }}{% endif %}</option>{% endfor %}</optgroup>{% endfor %}
+</select><noscript><button>Add</button></noscript></form>
+{% endif %}</div></td>
 <td><form method="post" action="/products/{{ p.id }}/lifecycle" class="inline">
 <select name="lifecycle"><option {% if p.lifecycle=='Roadmap' %}selected{% endif %}>Roadmap</option>
 <option {% if p.lifecycle=='Active' %}selected{% endif %}>Active</option>
@@ -21,8 +29,8 @@
 <form method="post" action="/products/add" class="row">
 <input name="name" placeholder="Product name" required>
 <select name="category">{% for cat in categories %}<option>{{ cat }}</option>{% endfor %}</select>
-<select name="person_ids" multiple size="3" class="rosterpick">
-{% for label, folk in new_prod_opts %}<optgroup label="{{ label }}">
+<select name="person_id"><option value="">- Prod/Tech rep (optional) -</option>
+{% for lbl, folk in new_prod_opts %}<optgroup label="{{ lbl }}">
 {% for r in folk %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}</optgroup>{% endfor %}</select>
 <select name="lifecycle"><option>Roadmap</option><option selected>Active</option></select>
 <input name="launch_status" placeholder="Released / target Q4-26">
@@ -58,8 +66,8 @@ they appear in (or drop out of) every picker here. Pickers list the teams usuall
 everyone else under "Other teams", so pulling in RBO or another group is never blocked. Sales is left out
 of the Prod/Tech rep list entirely &mdash; if a technical person sits on another team, set that team on
 <a href="/team">Team</a> and they appear under "Other teams". Saving a seat writes a dated assignment, so
-<a href="/team">Team</a> keeps the full history of who covered what and when. Ctrl/Cmd-click to pick more than one
-Prod/Tech rep. Lifecycle: Roadmap = future launch (target date in the field), Active = on market,
+<a href="/team">Team</a> keeps the full history of who covered what and when. Prod/Tech reps are chips: pick from "+ add rep" to add one, click the &times; on a
+chip to remove them. Each change is saved immediately and recorded as a dated assignment. Lifecycle: Roadmap = future launch (target date in the field), Active = on market,
 EOL = end of life (hidden from the matrix by default, history retained). Remove = soft delete for mistakes.</p>
 {% if not people %}<p class="hint" style="color:#b00">The roster is empty &mdash; add people on <a href="/team">Team</a> before assigning seats.</p>{% endif %}
 {% endblock %}

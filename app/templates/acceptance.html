@@ -1,0 +1,47 @@
+{% extends "base.html" %}{% block body %}
+<h2>AVL Acceptance</h2>
+<p class="hint">Every product being pursued at every TPO, in one place: where the listing stands, how ready
+the dataroom is, what was last sent, and what is outstanding. Click a row for the full record.</p>
+
+<div class="kpis">
+<div class="kpi"><div class="n">{{ tot.n }}</div>pursuits</div>
+<div class="kpi win"><div class="n">{{ tot.listed }}</div>listed{% if tot.conditional %} <span class="sub2">({{ tot.conditional }} conditional)</span>{% endif %}</div>
+<div class="kpi"><div class="n">{{ tot.ready }}</div>dataroom ready to submit</div>
+<div class="kpi risk"><div class="n">{{ tot.blocked }}</div>with blocked requirements</div>
+<div class="kpi risk"><div class="n">{{ tot.overdue }}</div>past target date</div>
+</div>
+
+<form method="get" action="/acceptance" class="row" style="margin-bottom:10px">
+<select name="view" onchange="this.form.submit()">
+{% for k, lbl in [('active','Active pursuits'), ('pursuing','Not yet listed'), ('listed','Listed'),
+                  ('conditional','Conditional listings'), ('all','Everything')] %}
+<option value="{{ k }}" {% if view==k %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select>
+<select name="avl" onchange="this.form.submit()"><option value="0">All TPOs</option>
+{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel_a %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
+<span class="sub2" style="align-self:center">{{ rows|length }} row{{ '' if rows|length==1 else 's' }}</span>
+</form>
+
+<table class="list"><tr><th>TPO / product</th><th>Status</th><th>Dataroom</th><th></th>
+<th>Last package</th><th>Actions</th><th>IE</th><th>Owner</th><th>Target</th><th>Next milestone</th></tr>
+{% for r in rows %}<tr class="{{ 'overdue' if r.overdue_target }}">
+<td><a href="/pursuit/{{ r.l.avl_id }}/{{ r.l.product_id }}"><b>{{ r.l.avl_name }}</b></a>
+<div class="sub2">{{ r.l.product }}</div></td>
+<td><span class="ls ls-{{ r.l.status|replace(' ','')|replace(',','')|replace('/','') }}">{{ r.l.status }}</span>
+{% if r.l.condition %}<div class="sub2" title="{{ r.l.condition }}">{{ r.l.condition[:40] }}{% if r.l.condition|length > 40 %}&hellip;{% endif %}</div>{% endif %}</td>
+<td class="sub2">{% if r.rd.req %}{{ r.rd.done }}/{{ r.rd.req }} required{% if r.rd.accepted %} <span class="sub2">({{ r.rd.accepted }} accepted)</span>{% endif %}
+{% else %}<span class="hint">no checklist</span>{% endif %}</td>
+<td class="barcell">{% if r.rd.pct is not none %}<span class="bar"><i style="width:{{ r.rd.pct }}%" class="{{ 'full' if r.rd.pct==100 else '' }}"></i></span>
+{% if r.rd.ready %}<span class="chip ready">ready</span>{% endif %}
+{% if r.rd.blocked %}<b class="bad" title="blocked requirements">{{ r.rd.blocked }}&#9888;</b>{% endif %}{% endif %}</td>
+<td class="sub2">{% if r.pkg %}<b>{{ r.pkg.rev_code }}</b> {{ r.pkg.rev_date }}
+{% if r.pkg.n_gaps %}<div class="bad">{{ r.pkg.n_gaps }} gaps</div>{% endif %}
+{% else %}<span class="hint">none sent</span>{% endif %}</td>
+<td class="sub2">{% if r.open_actions %}{{ r.open_actions }} open{% if r.overdue_actions %} <b class="bad">{{ r.overdue_actions }} late</b>{% endif %}{% else %}-{% endif %}</td>
+<td class="sub2">{% if r.ie %}{{ r.ie.done }}/{{ r.ie.n }} <div>{{ r.ie.status }}</div>{% else %}-{% endif %}</td>
+<td class="sub2">{{ r.l.owner or '-' }}</td>
+<td class="sub2 nowrap">{{ r.l.target_date or '-' }}</td>
+<td class="sub2">{{ r.l.next_milestone }}</td>
+</tr>{% else %}<tr><td colspan="10" class="hint">Nothing matches that view.</td></tr>{% endfor %}</table>
+<p class="hint">"Ready" means every Required requirement is Complete, Submitted or Accepted. Red rows are past
+their target listing date and not yet listed.</p>
+{% endblock %}

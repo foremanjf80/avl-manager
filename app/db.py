@@ -3,8 +3,13 @@ import sqlite3, os, datetime
 
 DB_PATH = os.environ.get("AVL_DB", os.path.join(os.path.dirname(__file__), "..", "avl.db"))
 
-STATUSES = ["Listed", "In Review", "Execution", "Engagement", "Opportunity",
-            "No Interest", "No Info", "N/A", "Pre-launch"]
+STATUSES = ["Listed", "Listed, Conditional", "In Review", "Execution", "Engagement",
+            "Opportunity", "No Interest", "No Info", "N/A", "Pre-launch"]
+
+# A conditional listing still counts as on the AVL, but carries conditions that
+# have to be met to keep it or to have it lifted - so it is reported separately
+# wherever "how many are listed" is being asked.
+LISTED_STATUSES = ("Listed", "Listed, Conditional")
 
 ROLES = ["Account Manager (Sales)", "Sr. Commercial Rep (Sales)", "Product/Technical Rep (CE)"]
 
@@ -191,6 +196,11 @@ def _migrate(c):
     if "template_id" not in ck:
         c.execute("ALTER TABLE checklist_items ADD COLUMN template_id INTEGER")
         c.commit()
+    # eta was free text ("End Aug"), so nothing could be flagged late. Keep it for
+    # the loose case and add a real date beside it.
+    if "due_date" not in ck:
+        c.execute("ALTER TABLE checklist_items ADD COLUMN due_date TEXT DEFAULT ''")
+        c.commit()
     # Requirement rows carry the tracker's Document Category and obligation.
     for col, ddl in (("doc_category", "TEXT DEFAULT ''"),
                      ("obligation", "TEXT DEFAULT 'Required'")):
@@ -203,6 +213,29 @@ def _migrate(c):
         if ti and col not in ti:
             c.execute(f"ALTER TABLE workstream_template_items ADD COLUMN {col} {ddl}")
             c.commit()
+    li = [r[1] for r in c.execute("PRAGMA table_info(listings)")]
+    # A listing is the outcome; these turn it into a tracked pursuit. Deliberately
+    # not a second phase enum - status already says where it stands.
+    for col, ddl in (("owner", "TEXT DEFAULT ''"), ("owner_person_id", "INTEGER"),
+                     ("target_date", "TEXT DEFAULT ''"), ("submitted_at", "TEXT DEFAULT ''"),
+                     ("condition", "TEXT DEFAULT ''"), ("next_milestone", "TEXT DEFAULT ''"),
+                     ("risk", "TEXT DEFAULT ''"), ("priority", "TEXT DEFAULT 'Normal'")):
+        if col not in li:
+            c.execute(f"ALTER TABLE listings ADD COLUMN {col} {ddl}")
+            c.commit()
+    au = [r[1] for r in c.execute("PRAGMA table_info(audit)")]
+    # Free-text detail alone cannot be filtered by TPO or product, which is what
+    # made the audit log unusable. Events carry their subject from here on.
+    for col, ddl in (("avl_id", "INTEGER"), ("product_id", "INTEGER"),
+                     ("entity", "TEXT DEFAULT ''"), ("entity_id", "INTEGER")):
+        if col not in au:
+            c.execute(f"ALTER TABLE audit ADD COLUMN {col} {ddl}")
+            c.commit()
+    if "ix_audit_ts" not in [r[0] for r in c.execute(
+            "SELECT name FROM sqlite_master WHERE type='index'")]:
+        c.execute("CREATE INDEX IF NOT EXISTS ix_audit_ts ON audit(ts DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS ix_audit_avl ON audit(avl_id, product_id)")
+        c.commit()
     pk = [r[1] for r in c.execute("PRAGMA table_info(packages)")]
     # Packages get a revision number and code so a TPO can be told exactly which
     # cut they are looking at.
@@ -301,20 +334,78 @@ def init_db():
     _adopt_call_attendees(c)
     _adopt_action_owners(c)
     _seed_ie(c)
+    _backfill_audit_subjects(c)
     c.close()
 
-def log(user_email, action, detail=""):
+def log(user_email, action, detail="", avl_id=None, product_id=None,
+        entity="", entity_id=None):
     c = conn()
-    c.execute("INSERT INTO audit(ts, user_email, action, detail) VALUES(?,?,?,?)",
-              (datetime.datetime.now().isoformat(timespec="seconds"), user_email, action, detail))
+    c.execute("INSERT INTO audit(ts, user_email, action, detail, avl_id, product_id, "
+              "entity, entity_id) VALUES(?,?,?,?,?,?,?,?)",
+              (datetime.datetime.now().isoformat(timespec="seconds"), user_email, action,
+               detail, avl_id, product_id, entity, entity_id))
     c.commit(); c.close()
+
+
+# ---------------- activity feed (v25) ----------------
+# One stream over the audit log and the listing changelog. Status changes live in
+# their own table because they carry from/to, so they are merged in rather than
+# duplicated into audit.
+PURSUIT_PRIORITIES = ["High", "Normal", "Low"]
+
+ACTIVITY_TYPES = {
+    "status":     ("Listing status", ("status", "listing")),
+    "dataroom":   ("Dataroom", ("dataroom",)),
+    "package":    ("Packages", ("package",)),
+    "ie":         ("DNV / IE", ("ie",)),
+    "workstream": ("Templates", ("workstream",)),
+    "file":       ("Files", ("file", "files")),
+    "action":     ("Actions", ("action",)),
+    "call":       ("Calls", ("call",)),
+    "contact":    ("Contacts", ("contact",)),
+    "people":     ("Team", ("person", "assign", "product", "avl")),
+    "admin":      ("Admin", ("role", "backup", "seed", "migrate")),
+}
+
+def activity_type(action):
+    head = (action or "").split(":")[0]
+    for key, (_lbl, prefixes) in ACTIVITY_TYPES.items():
+        if head in prefixes:
+            return key
+    return "admin"
+
+def _backfill_audit_subjects(c):
+    """Best effort: match older free-text detail against known AVL / product names.
+
+    Only fills rows that have no subject yet, and only on an unambiguous single
+    match, so it can never invent a wrong attribution.
+    """
+    if c.execute("SELECT value FROM meta WHERE key='audit_backfilled'").fetchone():
+        return
+    avls = [(r["id"], r["name"]) for r in c.execute("SELECT id, name FROM avls")]
+    prods = [(r["id"], r["name"]) for r in c.execute("SELECT id, name FROM products")]
+    for r in c.execute("SELECT id, detail FROM audit WHERE avl_id IS NULL AND product_id IS NULL "
+                       "AND COALESCE(detail,'')<>''").fetchall():
+        d = r["detail"]
+        a = [i for i, n in avls if n and n in d]
+        p = [i for i, n in prods if n and n in d]
+        if len(a) == 1 or len(p) == 1:
+            c.execute("UPDATE audit SET avl_id=?, product_id=? WHERE id=?",
+                      (a[0] if len(a) == 1 else None, p[0] if len(p) == 1 else None, r["id"]))
+    c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('audit_backfilled', ?)",
+              (datetime.datetime.now().isoformat(timespec="seconds"),))
+    c.commit()
 
 
 WORKSTREAMS = ["DNV / Bankability (IE)", "Certification & Standards", "3rd Party Validation (RETC/PVEL)",
                "Beta & Field Validation", "Factory Quality & Audit", "Design Tools / Software",
                "API + Cybersecurity", "BOM Change Control & Re-qual",
                "Tax Credit & Trade Compliance", "Commercial & Warranty Terms", "Corporate & Vendor Diligence"]
-CHECK_STATUSES = ["Not Started", "In Progress", "Blocked", "Complete", "TBD"]
+CHECK_STATUSES = ["Not Started", "In Progress", "Blocked", "Complete", "Submitted", "Accepted", "TBD"]
+
+# "Complete" means we hold the document; "Submitted" that it has gone to the TPO;
+# "Accepted" that they have taken it. All three count as done on our side.
+CHECK_DONE = ("Complete", "Submitted", "Accepted")
 
 
 # ---------------- workstream templates (v7) ----------------

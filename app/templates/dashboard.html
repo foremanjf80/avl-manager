@@ -10,13 +10,13 @@
 <tr class="cat"><td colspan="{{ avls|length + 1 }}">{{ p.category }}</td></tr>{% endif %}
 <tr><td class="pname">{{ p.name }} {% if p.lifecycle == "Roadmap" %}<span class="chip roadmap">Roadmap {{ p.launch_status }}</span>{% elif p.lifecycle == "EOL" %}<span class="chip eol">EOL</span>{% endif %}<div class="sub">{% if p.lifecycle == "Active" %}{{ p.launch_status }}{% endif %}{% if p.tech_reps %} - {{ p.tech_reps }}{% endif %}</div></td>
 {% for a in avls %}{% set cell = grid.get((p.id, a.id)) %}
-<td class="s-{{ (cell.status if cell else 'No Info')|replace(' ','')|replace('/','')|replace('-','') }}">
+<td class="s-{{ (cell.status if cell else 'No Info')|replace(' ','')|replace('/','')|replace('-','')|replace(',','') }}">
 <form method="post" action="/listing">
 <input type="hidden" name="product_id" value="{{ p.id }}">
 <input type="hidden" name="avl_id" value="{{ a.id }}">
 <select name="status" onchange="this.form.submit()" title="{% if cell %}{{ cell.note }} (by {{ cell.updated_by }} {{ cell.updated_at }}){% endif %}">
 {% for st in statuses %}<option {% if cell and cell.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}
-</select></form><a class="notelink {{ 'hasnote' if cell and cell.note }}" href="#" onclick="return editNote({{ p.id }},{{ a.id }},this)" title="{{ cell.note if cell else '' }}">✎</a></td>{% endfor %}</tr>
+</select></form><a class="notelink {{ 'hasnote' if cell and cell.note }}" href="#" onclick="return editNote({{ p.id }},{{ a.id }},this)" title="{{ cell.note if cell else '' }}">✎</a><a class="notelink" href="/pursuit/{{ a.id }}/{{ p.id }}" title="Acceptance record for {{ p.name }} at {{ a.name }}">&#8599;</a></td>{% endfor %}</tr>
 {% endfor %}</tbody></table></div>
 <p class="hint">Hover a cell for who last changed it and when. Every change is written to the audit log.</p>
 <form method="post" action="/listing/note" id="noteform" style="display:none">

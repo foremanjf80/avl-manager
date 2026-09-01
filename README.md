@@ -330,3 +330,93 @@ The app itself still reads and writes SQLite - `AVL_BACKEND` is accepted but
 `airtable` is not wired into `db.conn()`. Attachments are file paths on disk,
 not Airtable attachment fields, so `data_uploads/` still has to be migrated
 separately when the app moves off this box.
+
+## v21 - Prod/Tech reps as chips
+The multi-select scroll box on Manage is gone. Assigned reps show as chips with
+an x to remove, and a "+ add rep" dropdown lists only people not already on that
+product, grouped Technical teams first (Sales is still never offered). Each click
+saves immediately and writes a dated assignment, so there is no separate Save for
+reps and the Team history stays complete - removing a rep ends the assignment
+rather than deleting it. The dropdown hides when everyone eligible is already
+assigned, and a product with no reps reads "none assigned".
+
+The Add product form now takes one optional Prod/Tech rep; further reps are added
+from the chips on the row.
+
+Chips lay out along the row and wrap, rather than stacking, and the remove control
+is a small 16px x inside the chip. It carries its own .chipx class so the global
+button rule can never restyle it into a full-size blue button. The stylesheet link
+is also versioned by file mtime now, so a CSS change is not hidden behind a
+browser cache.
+
+## v23 - conditional listings, and actions on any product
+New matrix status "Listed, Conditional", ordered right after Listed: a listing
+that is real but carries conditions to be met to keep it, or closed out to have
+it lifted. It renders as the Listed green with a hatch so it reads as listed at a
+glance while still standing out, and the per-cell note is where the condition
+itself goes. Exec counts it within "Listed" coverage - it is on the AVL - with a
+"n cond." chip so the caveat is never lost, and a status change to it is a win in
+the monthly rollup like any other listing.
+
+Actions can now be raised against any active product at any TPO, listed or not.
+Previously the product dropdown only offered products that already had a seeded
+dataroom checklist, which made it impossible to log the work of getting a product
+listed in the first place. Each action row shows the listing status of its
+product x TPO, so chasing a listing and chasing a condition on an existing one
+are tellable apart, and the form shows the current status as you pick. A new
+filter narrows to actions on unlisted products, listed products, conditional
+listings, or actions with no product attached. Workstream requirements are still
+only offered where that product x TPO has a checklist, since a requirement does
+not exist until then.
+
+## v24 - workstream requirements attachable to any action
+The requirement picker on Actions no longer depends on a seeded checklist. It
+loads on demand for the chosen product x TPO and offers two groups:
+
+  On this checklist            requirements already tracked there
+  Not tracked yet - from <T>   the rest of the best-matching template
+
+Picking an untracked one adds that single requirement to the checklist and links
+the action to it. This is the normal case for a conditional listing: the
+condition is usually about a requirement nobody has started tracking, and it has
+to be attachable without seeding a whole template first. Picking the same one
+again reuses the row rather than duplicating it, and only that requirement is
+added - not the rest of the template.
+
+Loading on demand rather than embedding: 12 products x 11 AVLs x ~80 template
+items is far too much to ship in the page, so the picker calls
+/actions/requirements?avl_id=&product_id= when the pair changes.
+
+## v25 - AVL acceptance, one activity feed, dataroom workflow
+Three changes that go together.
+
+Acceptance (/acceptance and /pursuit/<avl>/<product>). Everything else in the app
+is organised by function; this is organised by the thing being pursued. The
+portfolio lists every product x TPO with listing status, dataroom readiness, the
+last package sent, open and overdue actions, IE progress, owner, target date and
+next milestone. Each record pulls those together on one page with the outstanding
+required requirements, the actions, TPO contacts and recent calls, packages sent,
+and a scoped activity feed. Dashboard cells link straight to it.
+
+Listings gain pursuit fields - owner, target listing date, submitted date,
+condition, next milestone, risk, priority. Deliberately no second phase enum:
+status already says where a pursuit stands, and two taxonomies would drift apart.
+
+Activity (/activity) replaces History and Audit, which are now redirects. One
+stream over the audit log and the status changelog, filtered by event type, TPO,
+product, person, month and free text, exportable as CSV. Audit rows now carry
+avl_id / product_id / entity so they can be filtered at all - older rows are
+backfilled only where a name matched unambiguously. The same feed, scoped, is
+what the acceptance record shows.
+
+Dataroom workflow. "Complete" splits into Complete (we hold it) -> Submitted
+(sent to the TPO) -> Accepted (they took it); all three count as done, and the
+tracker reports accepted separately. Requirements gain a real due date beside the
+loose ETA text, and overdue rows show red. A per-category bulk control sets owner,
+due date or status across a whole document category at once. /dataroom/queue
+lists requirements across every product x TPO, filtered by owner, status, TPO or
+overdue - the view a person works their own list from.
+
+Fixes: /dataroom/{iid} shadowed /dataroom/bulk, so the row update moved to
+/dataroom/item/{iid}/update; and adding due_date to checklist_items made the
+ORDER BY in the actions query ambiguous against actions.due_date.

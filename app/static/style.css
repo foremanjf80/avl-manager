@@ -51,7 +51,6 @@ h3.grp .sub2{margin-left:10px;font-weight:normal}
 .ob-Required{background:#fde8e8;color:#a02020}
 .ob-Conditional{background:#fff4e0;color:#8a5a00}
 .ob-Optional{background:#eef3f7;color:#5a6a7a}
-select.rosterpick{min-width:150px}
 .chip.primary{background:var(--navy);color:#fff;font-size:10px;padding:1px 5px;border-radius:3px}
 td.nowrap{white-space:nowrap}
 td.nowrap a{text-decoration:none;font-size:15px;margin-right:4px}
@@ -89,3 +88,55 @@ td.editcell{background:#f7f9fc;padding:12px}
 .chip.overdue{background:#b00020;color:#fff;font-size:11px;padding:1px 7px;border-radius:3px;vertical-align:middle}
 form.picker{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 form.picker select{max-width:260px}
+/* Prod/Tech reps: chips flow along the row, add control sits at the end. */
+td.repcell{min-width:300px}
+.repwrap{display:flex;flex-wrap:wrap;align-items:center;gap:5px}
+.chipform{display:inline-flex}
+.chip.person{display:inline-flex;align-items:center;gap:3px;background:#e8eef5;color:var(--navy);
+  border:1px solid #c9d7e6;border-radius:11px;padding:1px 3px 1px 9px;font-size:12px;
+  line-height:18px;white-space:nowrap}
+/* Own class so the global button rule can never win. */
+button.chipx{background:none;border:0;color:#7d8a99;font:inherit;font-size:13px;line-height:16px;
+  width:16px;height:16px;min-width:16px;padding:0;margin:0;border-radius:50%;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center}
+button.chipx:hover{background:#b00020;color:#fff}
+form.addrep{display:inline-flex}
+form.addrep select{font-size:12px;padding:2px 4px;color:#5a6a7a;border:1px dashed #a9b6c4;
+  background:#fff;border-radius:11px;max-width:160px;line-height:16px}
+/* A conditional listing reads as listed, but visibly flagged. */
+.s-ListedConditional{background:#C6EFCE;background-image:repeating-linear-gradient(135deg,
+  rgba(255,193,7,.28) 0 6px, transparent 6px 12px)}
+.s-ListedConditional select{font-weight:bold}
+.chip.cond{background:#fff4e0;color:#8a5a00;border:1px solid #e8c98c;font-size:10px;padding:0 5px}
+.ls{font-size:9.5px;padding:1px 6px;border-radius:9px;margin-left:5px;white-space:nowrap;
+  border:1px solid transparent}
+.ls-Listed{background:#C6EFCE;color:#1e6b34;border-color:#a5ddb6}
+.ls-ListedConditional{background:#fff4e0;color:#8a5a00;border-color:#e8c98c}
+.ls-InReview{background:#BDD7EE;color:#1F3864;border-color:#9dbedd}
+.ls-Execution{background:#A8F0EA;color:#0f5e58}
+.ls-Engagement,.ls-Opportunity{background:#FCE4D6;color:#8a4b1f}
+.ls-NoInterest{background:#F8CBAD;color:#8a3b1f}
+.ls-NoInfo,.ls-Nottracked,.ls-NA,.ls-Prelaunch{background:#EDEDED;color:#777}
+.liveStatus.ok{color:#1e6b34}
+.ak{font-size:9.5px;padding:1px 6px;border-radius:9px;white-space:nowrap;border:1px solid #dde3ea;
+  background:#f2f5f8;color:#5a6a7a}
+.ak-status{background:#dff0e0;color:#1e6b34;border-color:#bcdcc0}
+.ak-dataroom{background:#e6eef8;color:#1F3864;border-color:#c6d8ee}
+.ak-package{background:#efe6f8;color:#5a2f7a;border-color:#d8c6ee}
+.ak-ie{background:#e0f2f1;color:#0f5e58;border-color:#bfe3e0}
+.ak-action{background:#fff1e0;color:#8a5a00;border-color:#eed9b8}
+.ak-file{background:#f0f0f0;color:#666}
+table.act tr.statusrow td{background:#fbfdfb}
+table.act td{vertical-align:top}
+.chip.ready{background:#dff0e0;color:#1e6b34;border:1px solid #bcdcc0;font-size:9.5px;padding:0 5px;margin-left:4px}
+.pursuit .cols3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+@media(max-width:1200px){.pursuit .cols3{grid-template-columns:1fr 1fr}}
+@media(max-width:800px){.pursuit .cols3{grid-template-columns:1fr}}
+.pgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.pgrid label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#555}
+@media(max-width:900px){.pgrid{grid-template-columns:1fr 1fr}}
+.bignum{font-size:22px;font-weight:bold;color:var(--navy)}
+select.cs-Submitted{background:#BDD7EE}select.cs-Accepted{background:#C6EFCE;font-weight:bold}
+form.bulkrow{margin:4px 0 6px;padding:4px 8px;background:#f7f9fc;border-radius:5px}
+form.bulkrow select,form.bulkrow input{font-size:12px;padding:2px 4px}
+form.bulkrow button{padding:3px 9px;font-size:11.5px}

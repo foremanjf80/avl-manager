@@ -1,0 +1,34 @@
+{% extends "base.html" %}{% block body %}
+<div class="row" style="justify-content:space-between"><h2>Activity</h2>
+<a class="btn small" href="/activity.csv?avl={{ sel.avl }}&amp;product={{ sel.product }}&amp;kind={{ sel.kind }}&amp;who={{ sel.who }}&amp;month={{ sel.month }}&amp;q={{ sel.q }}">CSV</a></div>
+<p class="hint">Everything that has happened, in one stream &mdash; listing status changes alongside dataroom,
+package, IE, file, action, call and template events. Replaces the separate History and Audit pages.</p>
+
+<form method="get" action="/activity" class="row" style="margin-bottom:10px">
+<select name="kind" onchange="this.form.submit()"><option value="">All event types</option>
+{% for k, v in types.items() %}<option value="{{ k }}" {% if sel.kind==k %}selected{% endif %}>{{ v[0] }}</option>{% endfor %}</select>
+<select name="avl" onchange="this.form.submit()"><option value="0">All TPOs</option>
+{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel.avl %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
+<select name="product" onchange="this.form.submit()"><option value="0">All products</option>
+{% for p in products %}<option value="{{ p.id }}" {% if p.id==sel.product %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+<select name="who" onchange="this.form.submit()"><option value="">Anyone</option>
+{% for p in people %}<option value="{{ p }}" {% if sel.who==p %}selected{% endif %}>{{ p }}</option>{% endfor %}</select>
+<select name="month" onchange="this.form.submit()"><option value="">All months</option>
+{% for m in months %}<option {% if sel.month==m %}selected{% endif %}>{{ m }}</option>{% endfor %}</select>
+<input name="q" value="{{ sel.q }}" placeholder="Search detail" size="18"><button>Search</button>
+<span class="sub2" style="align-self:center">{{ rows|length }} event{{ '' if rows|length==1 else 's' }}</span>
+</form>
+
+<table class="list act"><tr><th>When</th><th>Type</th><th>Event</th><th>TPO / product</th><th>Who</th></tr>
+{% for r in rows %}<tr class="{{ 'statusrow' if r.kind=='status' }}">
+<td class="sub2 nowrap">{{ r.ts[:16]|replace('T',' ') }}</td>
+<td><span class="ak ak-{{ r.kind }}">{{ types[r.kind][0] if r.kind in types else r.kind }}</span></td>
+<td>{% if r.to %}<b>{{ r['from'] or '-' }} &rarr; {{ r.to }}</b>{% if r.detail %}<div class="sub2">{{ r.detail }}</div>{% endif %}
+{% else %}<span class="sub2">{{ r.action }}</span> {{ r.detail }}{% endif %}</td>
+<td class="sub2">{% if r.avl %}<b>{{ r.avl }}</b>{% endif %}{% if r.product %}<div>{{ r.product }}</div>{% endif %}
+{% if r.avl_id and r.product_id %}<a href="/pursuit/{{ r.avl_id }}/{{ r.product_id }}" title="Open the acceptance record">&#8599;</a>{% endif %}</td>
+<td class="sub2">{{ r.who }}</td></tr>
+{% else %}<tr><td colspan="5" class="hint">Nothing matches those filters.</td></tr>{% endfor %}</table>
+<p class="hint">Events recorded before this page existed may not carry a TPO or product &mdash; those were
+only free text at the time, and are attributed here only where the name matched unambiguously.</p>
+{% endblock %}

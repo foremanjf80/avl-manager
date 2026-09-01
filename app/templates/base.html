@@ -1,24 +1,24 @@
 <!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Qcells AVL Manager</title>
-<link rel="stylesheet" href="/static/style.css"></head><body>
+<link rel="stylesheet" href="/static/style.css?v={{ css_v() }}"></head><body>
 <header><span class="brand">Qcells <b>AVL Manager</b></span>
 <nav>{% set path = request.url.path %}
 <a href="/" class="{{ 'active' if path == '/' }}">Dashboard</a>
+<a href="/acceptance" class="{{ 'active' if path.startswith('/acceptance') or path.startswith('/pursuit') }}">Acceptance</a>
 <a href="/calls" class="{{ 'active' if path.startswith('/calls') }}">Calls</a>
 <a href="/actions" class="{{ 'active' if path.startswith('/actions') }}">Actions</a>
 <a href="/dataroom" class="{{ 'active' if path.startswith('/dataroom') and not path.startswith('/dataroom/package') }}">Dataroom</a>
 <a href="/dataroom/package" class="{{ 'active' if path.startswith('/dataroom/package') }}">Package</a>
 <a href="/workstreams" class="{{ 'active' if path.startswith('/workstreams') }}">Workstreams</a>
 <a href="/ie" class="{{ 'active' if path.startswith('/ie') }}">DNV / IE</a>
-<a href="/history" class="{{ 'active' if path.startswith('/history') }}">History</a>
 <a href="/exec" class="{{ 'active' if path.startswith('/exec') }}">Exec</a>
 <a href="/contacts" class="{{ 'active' if path.startswith('/contacts') }}">Contacts</a>
 <a href="/team" class="{{ 'active' if path.startswith('/team') }}">Team</a>
 <a href="/files" class="{{ 'active' if path.startswith('/files') }}">Files</a>
 <a href="/manage" class="{{ 'active' if path.startswith('/manage') }}">Manage</a>
 <a href="/digest" class="{{ 'active' if path.startswith('/digest') }}">Digest</a>
-<a href="/audit" class="{{ 'active' if path.startswith('/audit') }}">Audit</a>
+<a href="/activity" class="{{ 'active' if path.startswith('/activity') or path.startswith('/history') or path.startswith('/audit') }}">Activity</a>
 {% if user and user.get('role') == 'admin' %}<a href="/admin" class="{{ 'active' if path.startswith('/admin') }}">Admin</a>{% endif %}</nav>
 <span class="who">{% if user %}{{ user.name }} ({{ user.email }}) <a href="/logout">Logout</a>{% endif %}</span>
 </header><main>{% block body %}{% endblock %}</main></body></html>

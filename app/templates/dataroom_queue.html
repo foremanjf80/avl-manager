@@ -1,0 +1,31 @@
+{% extends "base.html" %}{% block body %}
+<h2>Requirement Queue {% if n_overdue %}<span class="chip overdue">{{ n_overdue }} overdue</span>{% endif %}</h2>
+<p class="hint">Every dataroom requirement across every product &times; TPO, so a person can work their own
+list without opening each checklist. Back to the <a href="/dataroom">checklists</a>.</p>
+
+<form method="get" action="/dataroom/queue" class="row" style="margin-bottom:10px">
+<select name="owner" onchange="this.form.submit()"><option value="">Any owner</option>
+{% for o in owners %}<option value="{{ o }}" {% if sel.owner==o %}selected{% endif %}>{{ o }}</option>{% endfor %}</select>
+<select name="status" onchange="this.form.submit()">
+<option value="">Any status</option>
+<option value="open" {% if sel.status=='open' %}selected{% endif %}>Still open</option>
+{% for st in statuses %}<option value="{{ st }}" {% if sel.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select>
+<select name="avl" onchange="this.form.submit()"><option value="0">All TPOs</option>
+{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel.avl %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
+<label class="sub2" style="align-self:center"><input type="checkbox" name="overdue" value="1"
+  {% if sel.overdue %}checked{% endif %} onchange="this.form.submit()"> overdue only</label>
+<span class="sub2" style="align-self:center">{{ rows|length }} requirement{{ '' if rows|length==1 else 's' }}</span>
+</form>
+
+<table class="list"><tr><th>Due</th><th>TPO / product</th><th>Requirement</th><th></th><th>Status</th><th>Owner</th><th></th></tr>
+{% for r in rows %}<tr class="{{ 'overdue' if r.due_date and r.due_date < today and r.status not in ('Complete','Submitted','Accepted') }}">
+<td class="sub2 nowrap">{{ r.due_date or r.eta or '-' }}</td>
+<td class="sub2"><b>{{ r.avl_name }}</b><div>{{ r.product }}</div></td>
+<td>{% if r.doc_category %}<span class="sub2">{{ r.doc_category }}</span><br>{% endif %}{{ r.workstream }}</td>
+<td><span class="ob ob-{{ r.obligation }}">{{ r.obligation[:4] }}</span></td>
+<td><span class="ak ak-{{ 'status' if r.status in ('Complete','Submitted','Accepted') else 'dataroom' }}">{{ r.status }}</span></td>
+<td class="sub2">{{ r.owner or '-' }}</td>
+<td class="nowrap"><a href="/dataroom?product={{ r.product_id }}&amp;avl={{ r.avl_id }}" title="Open the checklist">&#8599;</a>
+<a href="/pursuit/{{ r.avl_id }}/{{ r.product_id }}" title="Acceptance record">&#9679;</a></td>
+</tr>{% else %}<tr><td colspan="7" class="hint">Nothing matches those filters.</td></tr>{% endfor %}</table>
+{% endblock %}
