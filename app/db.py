@@ -66,9 +66,14 @@ def role_options(people, role, held_ids=()):
     return groups
 
 def conn():
-    c = sqlite3.connect(DB_PATH)
+    c = sqlite3.connect(DB_PATH, timeout=15)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA foreign_keys=ON")
+    # WAL lets readers carry on while someone is saving a form, which is the
+    # difference between "fine for one person" and "fine for a team". It is a
+    # property of the file, so this is a no-op after the first connection.
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA busy_timeout=15000")
     return c
 
 SCHEMA = """

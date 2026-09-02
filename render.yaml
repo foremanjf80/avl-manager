@@ -1,0 +1,35 @@
+# Render blueprint. The disk is the whole point: without it, Render's filesystem
+# is ephemeral and avl.db plus every uploaded document is lost on each deploy.
+services:
+  - type: web
+    name: avl-manager
+    runtime: python
+    plan: starter                 # a disk requires a paid instance
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    disk:
+      name: avl-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.3"
+      - key: AVL_DB                # database on the persistent disk
+        value: /data/avl.db
+      - key: AVL_UPLOADS           # uploaded documents beside it
+        value: /data/data_uploads
+      - key: SECURE_COOKIES
+        value: "1"                 # Render terminates TLS for you
+      - key: ALLOWED_DOMAIN
+        value: qcells.com
+      - key: SECRET_KEY
+        generateValue: true        # Render generates and stores it
+      - key: AUTH_MODE
+        sync: false                # set in the dashboard: oidc (see README)
+      - key: OIDC_CLIENT_ID
+        sync: false
+      - key: OIDC_CLIENT_SECRET
+        sync: false
+      - key: OIDC_METADATA_URL
+        sync: false

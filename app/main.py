@@ -10,7 +10,12 @@ from .auth import (AUTH_MODE, domain_ok, current_user, require_user, require_edi
                    require_admin, get_role, ALLOWED_DOMAIN)
 
 app = FastAPI(title="Qcells AVL Manager")
-app.add_middleware(SessionMiddleware, secret_key=os.environ.get("SECRET_KEY", "change-me-in-prod"))
+# https_only stops the session cookie ever being sent in clear; set SECURE_COOKIES=1
+# once the app is behind TLS. Left off by default so plain-http local dev works.
+app.add_middleware(SessionMiddleware,
+                   secret_key=os.environ.get("SECRET_KEY", "change-me-in-prod"),
+                   https_only=os.environ.get("SECURE_COOKIES", "") == "1",
+                   same_site="lax")
 BASE = os.path.dirname(__file__)
 app.mount("/static", StaticFiles(directory=os.path.join(BASE, "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(BASE, "templates"))
@@ -25,6 +30,11 @@ def _css_v():
 templates.env.globals["css_v"] = _css_v
 
 db.init_db()
+
+@app.get("/healthz")
+def healthz():
+    """Unauthenticated liveness probe for the host's health check."""
+    return {"ok": True}
 
 def now():
     return datetime.datetime.now().isoformat(timespec="seconds")
@@ -662,7 +672,9 @@ import io, csv, shutil, re as _re
 from fastapi import UploadFile, File
 from fastapi.responses import StreamingResponse, FileResponse
 
-UPLOAD_DIR = os.path.join(os.path.dirname(BASE), "data_uploads")
+# Must be settable: on a hosted box the uploads belong on the same persistent
+# volume as the database, not inside the checked-out code.
+UPLOAD_DIR = os.environ.get("AVL_UPLOADS", os.path.join(os.path.dirname(BASE), "data_uploads"))
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def _csv_response(rows, header, fname):
