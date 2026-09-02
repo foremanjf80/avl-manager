@@ -475,3 +475,30 @@ AUTH_MODE on a URL other people can reach:
 The first person to sign in becomes admin, so do that before sharing the URL.
 Take a backup regularly from /admin, or run scripts/backup.sh as a scheduled job;
 a mounted disk is still only one copy.
+
+## Resetting to base state
+    python3 scripts/reset.py                # report only, changes nothing
+    python3 scripts/reset.py --templates    # workstream + IE templates back to shipped
+    python3 scripts/reset.py --work         # clear the work, keep the setup
+    python3 scripts/reset.py --fresh        # start completely over
+
+Dry run by default, and every destructive mode takes a timestamped backup beside
+the database first (so on a hosted box the backup lands on the persistent disk,
+not in ephemeral code).
+
+--fresh is the truest "base state": the seeders are written to fill an empty
+database, so re-seeding from empty gives exactly what a new deployment gets -
+12 products, 12 TPO AVLs, the Aug-2026 matrix, the 5-person roster, 7 workstream
+templates (575 requirements) and 2 IE baselines (148 items), with no checklists,
+reports, packages, actions, contacts, files or users. The first person to sign in
+becomes admin again.
+
+--templates re-seeds both template libraries in place, including undoing any
+rename, and clears their edit history. Checklists already seeded from a template
+are left alone; their template_id is cleared so nothing points at a deleted row.
+
+--work clears checklists, packages, IE reports, actions, contacts, calls,
+attachments and the uploaded files, keeping products, AVLs, the matrix, the
+roster, both template libraries and the audit log.
+
+A new deployment needs none of this: an empty disk seeds itself.
