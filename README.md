@@ -446,3 +446,32 @@ Genuinely missing requirements still read NO DOCUMENT.
 
 Fix: the package page's template-drift warning had been rendered twice since v17,
 once spliced into the middle of the "what will be sent" sentence.
+
+## Hosting the SQLite build
+Everything durable is two paths: the database (AVL_DB) and the uploaded documents
+(AVL_UPLOADS). Copy those two and the app is wherever you put them; migrations
+run on startup, so a newer build reads an older database without ceremony. That
+is also the migration path to Airtable or Postgres later - app/airtable/migrate.py
+reads the same file.
+
+On a host with a mounted volume, point both at it. render.yaml does this: a 1 GB
+disk at /data, AVL_DB=/data/avl.db, AVL_UPLOADS=/data/data_uploads. Without a
+persistent disk Render's filesystem is ephemeral and both are lost on every
+deploy. SQLite runs in WAL with a 15s busy timeout, so readers are not blocked
+while someone saves a form. Set SECURE_COOKIES=1 behind TLS.
+
+AUTH_MODE on a URL other people can reach:
+  oidc    real SSO. Register an app in Entra, redirect URI
+          https://<host>/auth/callback, scopes openid profile email.
+  shared  stopgap: the dev form plus one team-wide password (SHARED_PASSWORD,
+          minimum 12 characters or every login is refused). It identifies the
+          team, not the person - the audit trail records whatever name and email
+          someone types. Sign-in locks per client address for 15 minutes after 8
+          failures, and failures are recorded in the audit log.
+  dev     no password at all. Local only. If it is running behind TLS the app
+          says so at startup and on the login page, because that combination is
+          almost always a mistake.
+
+The first person to sign in becomes admin, so do that before sharing the URL.
+Take a backup regularly from /admin, or run scripts/backup.sh as a scheduled job;
+a mounted disk is still only one copy.

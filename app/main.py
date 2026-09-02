@@ -8,6 +8,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import db
 from .auth import (AUTH_MODE, domain_ok, current_user, require_user, require_editor,
                    require_admin, get_role, ALLOWED_DOMAIN)
+from . import auth as _auth
 
 app = FastAPI(title="Qcells AVL Manager")
 # https_only stops the session cookie ever being sent in clear; set SECURE_COOKIES=1
@@ -31,6 +32,9 @@ templates.env.globals["css_v"] = _css_v
 
 db.init_db()
 
+for _w in _auth.startup_warnings():
+    print(f"WARNING: {_w}", flush=True)
+
 @app.get("/healthz")
 def healthz():
     """Unauthenticated liveness probe for the host's health check."""
@@ -42,12 +46,35 @@ def now():
 # ---------------- auth routes ----------------
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
-    return templates.TemplateResponse(request, "login.html", {"user": None, "mode": AUTH_MODE, "domain": ALLOWED_DOMAIN})
+    return templates.TemplateResponse(request, "login.html", {"user": None, "mode": AUTH_MODE,
+        "domain": ALLOWED_DOMAIN, "warnings": _auth.startup_warnings(),
+        "needs_password": AUTH_MODE == "shared"})
+
+def _client_ip(request: Request):
+    fwd = request.headers.get("X-Forwarded-For", "")
+    return (fwd.split(",")[0].strip() if fwd else None) or \
+           (request.client.host if request.client else "unknown")
 
 @app.post("/login/dev")
-def login_dev(request: Request, name: str = Form(...), email: str = Form(...)):
-    if AUTH_MODE != "dev" or not domain_ok(email):
+def login_dev(request: Request, name: str = Form(...), email: str = Form(...),
+              password: str = Form("")):
+    """Form login for dev and shared modes; shared additionally needs the password."""
+    ip = _client_ip(request)
+    if not _auth.form_login_enabled():
+        return RedirectResponse("/login", status_code=303)
+    if _auth.login_blocked(ip):
+        return RedirectResponse("/login?error=locked", status_code=303)
+    if not domain_ok(email):
+        _auth.note_login_failure(ip)
         return RedirectResponse("/login?error=domain", status_code=303)
+    if AUTH_MODE == "shared":
+        if not _auth.shared_password_configured():
+            return RedirectResponse("/login?error=unconfigured", status_code=303)
+        if not _auth.shared_password_ok(password):
+            _auth.note_login_failure(ip)
+            db.log(email.lower().strip(), "login:failed", f"bad shared password from {ip}")
+            return RedirectResponse("/login?error=password", status_code=303)
+    _auth.clear_login_failures(ip)
     request.session["user"] = {"email": email.lower().strip(), "name": name.strip()}
     _touch_user(request.session["user"])
     return RedirectResponse("/", status_code=303)

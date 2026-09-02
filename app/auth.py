@@ -1,22 +1,76 @@
 """Auth for Qcells AVL Manager.
 
-Two modes, chosen by AUTH_MODE env var:
-  dev  - local login form; any name + email is accepted but the email domain
-         is still enforced (ALLOWED_DOMAIN). Use this in WSL while developing.
-  oidc - real SSO via any OIDC provider (Microsoft Entra ID recommended for
-         @qcells.com). Configure OIDC_* env vars; the id_token email domain
-         is enforced server-side regardless of provider settings.
+Modes, chosen by AUTH_MODE env var:
+  dev    - local login form; any name + email is accepted but the email domain
+           is still enforced (ALLOWED_DOMAIN). Use this in WSL while developing.
+           Never expose this beyond your own machine.
+  shared - the dev form plus one team-wide password (SHARED_PASSWORD). A stopgap
+           for a hosted trial when an SSO app registration is not available yet:
+           it is not per-person auth and gives no accountability beyond the email
+           someone types, but it is the difference between "the team can use it"
+           and "anyone with the URL can". Move to oidc as soon as you can.
+  oidc   - real SSO via any OIDC provider (Microsoft Entra ID recommended for
+           @qcells.com). Configure OIDC_* env vars; the id_token email domain
+           is enforced server-side regardless of provider settings.
 
 Deployment shortcut: if you host on Azure App Service, its built-in
 authentication ("Easy Auth") can front the whole app with Entra ID and you
 can run AUTH_MODE=easyauth to trust the X-MS-CLIENT-PRINCIPAL-NAME header.
 """
-import os, base64, json
+import os, base64, json, hmac, time
 from fastapi import Request, HTTPException
 from starlette.responses import RedirectResponse
 
 ALLOWED_DOMAIN = os.environ.get("ALLOWED_DOMAIN", "qcells.com")
 AUTH_MODE = os.environ.get("AUTH_MODE", "dev")
+SHARED_PASSWORD = os.environ.get("SHARED_PASSWORD", "")
+MIN_SHARED_PASSWORD = 12
+
+def shared_password_configured():
+    """Fail closed: a short or missing password is treated as not configured."""
+    return len(SHARED_PASSWORD) >= MIN_SHARED_PASSWORD
+
+def shared_password_ok(supplied):
+    if not shared_password_configured():
+        return False
+    return hmac.compare_digest(supplied or "", SHARED_PASSWORD)
+
+def form_login_enabled():
+    return AUTH_MODE in ("dev", "shared")
+
+def startup_warnings():
+    """Configuration that is legitimate locally but dangerous once hosted."""
+    out = []
+    behind_tls = os.environ.get("SECURE_COOKIES", "") == "1"
+    if AUTH_MODE == "dev" and behind_tls:
+        out.append("AUTH_MODE=dev behind TLS: anyone who reaches this URL can sign "
+                   "in with any @%s address and no password. Set AUTH_MODE=oidc, or "
+                   "AUTH_MODE=shared with SHARED_PASSWORD as a stopgap." % ALLOWED_DOMAIN)
+    if AUTH_MODE == "shared" and not shared_password_configured():
+        out.append("AUTH_MODE=shared but SHARED_PASSWORD is missing or shorter than "
+                   "%d characters. All logins will be refused until it is set."
+                   % MIN_SHARED_PASSWORD)
+    if os.environ.get("SECRET_KEY", "change-me-in-prod") == "change-me-in-prod" and behind_tls:
+        out.append("SECRET_KEY is still the default while hosted: sessions are forgeable.")
+    return out
+
+# Failed form logins, per client address. In-memory is the right scope here: the
+# app runs as a single process, and a restart clearing the counters is not a
+# meaningful weakening of a stopgap.
+_FAILS = {}
+LOCKOUT_AFTER = 8
+LOCKOUT_WINDOW = 900      # 15 minutes
+
+def login_blocked(ip):
+    hits = [t for t in _FAILS.get(ip, []) if time.time() - t < LOCKOUT_WINDOW]
+    _FAILS[ip] = hits
+    return len(hits) >= LOCKOUT_AFTER
+
+def note_login_failure(ip):
+    _FAILS.setdefault(ip, []).append(time.time())
+
+def clear_login_failures(ip):
+    _FAILS.pop(ip, None)
 
 def domain_ok(email: str) -> bool:
     return email.lower().strip().endswith("@" + ALLOWED_DOMAIN)

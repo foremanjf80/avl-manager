@@ -25,8 +25,13 @@ services:
         value: qcells.com
       - key: SECRET_KEY
         generateValue: true        # Render generates and stores it
+      # Set in the dashboard, never in Git. Use oidc if you can register an
+      # Entra app; shared + SHARED_PASSWORD is the stopgap until then. Leaving
+      # this as dev on a public URL means no password at all.
       - key: AUTH_MODE
-        sync: false                # set in the dashboard: oidc (see README)
+        sync: false
+      - key: SHARED_PASSWORD
+        sync: false
       - key: OIDC_CLIENT_ID
         sync: false
       - key: OIDC_CLIENT_SECRET

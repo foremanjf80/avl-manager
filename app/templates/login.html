@@ -1,11 +1,28 @@
 {% extends "base.html" %}{% block body %}
 <div class="card narrow"><h2>Sign in</h2>
-{% if request.query_params.get('error') %}<p class="err">Only @{{ domain }} accounts are allowed.</p>{% endif %}
-{% if mode == 'dev' %}
+
+{% for w in warnings %}<p class="err"><b>Configuration warning:</b> {{ w }}</p>{% endfor %}
+
+{% set err = request.query_params.get('error') %}
+{% if err == 'domain' %}<p class="err">Only @{{ domain }} accounts are allowed.</p>
+{% elif err == 'password' %}<p class="err">That team password is not right.</p>
+{% elif err == 'locked' %}<p class="err">Too many failed attempts. Try again in 15 minutes.</p>
+{% elif err == 'unconfigured' %}<p class="err">No team password is set on the server, so sign-in is disabled.</p>
+{% endif %}
+
+{% if mode in ('dev', 'shared') %}
 <form method="post" action="/login/dev">
 <label>Name <input name="name" required></label>
 <label>Email <input name="email" type="email" placeholder="you@{{ domain }}" required></label>
-<button>Sign in (dev mode)</button></form>
-<p class="hint">Dev mode: no password, domain still enforced. Set AUTH_MODE=oidc for real SSO.</p>
+{% if needs_password %}<label>Team password <input name="password" type="password" required autocomplete="current-password"></label>{% endif %}
+<button>Sign in</button></form>
+{% if needs_password %}
+<p class="hint">One password shared by the team, plus an @{{ domain }} address. A stopgap until SSO is
+available: it identifies the team, not the person, so the name and email you enter are what the audit
+trail records. Sign-in locks for 15 minutes after 8 failed attempts.</p>
+{% else %}
+<p class="hint">Dev mode: no password, domain still enforced. Set AUTH_MODE=oidc for real SSO, or
+AUTH_MODE=shared with SHARED_PASSWORD if this is reachable by anyone else.</p>
+{% endif %}
 {% else %}<a class="btn" href="/login/sso">Sign in with company SSO</a>{% endif %}
 </div>{% endblock %}
