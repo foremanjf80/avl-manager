@@ -4,7 +4,8 @@ services:
   - type: web
     name: avl-manager
     runtime: python
-    plan: starter                 # a disk requires a paid instance
+    plan: starter                 # paid: a persistent disk is not available on free
+    region: oregon
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
