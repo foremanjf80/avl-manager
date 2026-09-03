@@ -1589,11 +1589,26 @@ def set_role(request: Request, email: str = Form(...), role: str = Form(...),
 
 @app.get("/admin/backup")
 def backup(request: Request, user=Depends(require_admin)):
+    """Download a consistent snapshot, leaving nothing behind.
+
+    A plain file copy is not safe in WAL mode - recent commits live in the -wal
+    file and would be missing - so this uses SQLite's backup API. The temp file
+    is deleted once the response has been sent, rather than accumulating in the
+    uploads directory on a 1 GB disk.
+    """
+    import sqlite3, tempfile
+    from starlette.background import BackgroundTask
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    dest = os.path.join(UPLOAD_DIR, f"avl_backup_{stamp}.db")
-    shutil.copy(db.DB_PATH, dest)
-    db.log(user["email"], "backup", dest)
-    return FileResponse(dest, filename=f"avl_backup_{stamp}.db")
+    fd, tmp = tempfile.mkstemp(prefix=f"avl_backup_{stamp}_", suffix=".db")
+    os.close(fd)
+    src = sqlite3.connect(db.DB_PATH)
+    dst = sqlite3.connect(tmp)
+    with dst:
+        src.backup(dst)
+    src.close(); dst.close()
+    db.log(user["email"], "backup", f"downloaded ({os.path.getsize(tmp)} bytes)")
+    return FileResponse(tmp, filename=f"avl_backup_{stamp}.db",
+                        background=BackgroundTask(lambda: os.path.exists(tmp) and os.remove(tmp)))
 
 # ---------------- 9) attachments ----------------
 ATT_KINDS = ("product", "avl", "call", "checklist", "ie_item", "ie_section")
@@ -1695,8 +1710,11 @@ async def upload(request: Request, kind: str = Form(...), ref_id: int = Form(...
     safe = _re.sub(r"[^A-Za-z0-9._-]", "_", f.filename or "file")
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     stored = os.path.join(UPLOAD_DIR, f"{stamp}_{safe}")
+    # Streamed in chunks: a 512 MB instance cannot afford to hold a large DNV
+    # report or test-report PDF in memory just to write it to disk.
     with open(stored, "wb") as out:
-        out.write(await f.read())
+        while chunk := await f.read(1024 * 1024):
+            out.write(chunk)
     c = db.conn()
     c.execute("INSERT INTO attachments(kind, ref_id, filename, stored_path, uploaded_by, uploaded_at) "
               "VALUES(?,?,?,?,?,?)", (kind, ref_id, safe, stored, user["email"], now()))

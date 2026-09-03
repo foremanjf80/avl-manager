@@ -522,3 +522,19 @@ and how it behaved before - anyone with a permitted address (and the team passwo
 in shared mode) signs in and is created as an editor, and removing them only
 resets their role. The admin page says which of the two is in force. The list is
 ignored while no users exist, so a fresh deployment can never lock everyone out.
+
+## v28 - fit for a 512 MB instance and a 1 GB disk
+Uploads stream to disk in 1 MB chunks instead of being read whole into memory.
+A 120 MB test-report pack previously needed 120 MB of RAM to save; it now costs
+about 3 MB, which matters on a Starter instance.
+
+The /admin backup button used shutil.copy, which is not safe in WAL mode - recent
+commits live in the -wal file and would have been missing from the download - and
+it left every copy behind in the uploads directory, filling the disk over time. It
+now takes a proper SQLite snapshot to a temp file and deletes it once the download
+has been sent.
+
+Disk budgeting on 1 GB: evidence documents dominate, and every built package is a
+stored zip of the documents it contains, so packages roughly double the space a
+dataroom occupies. Delete superseded packages from /dataroom/package when they are
+no longer needed. Render disks can be grown but not shrunk.
