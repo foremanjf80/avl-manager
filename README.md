@@ -589,3 +589,23 @@ token as a password: it returns the entire dataset.
 Reading a .db: DB Browser for SQLite (sqlitebrowser.org) is the usual free GUI on
 Windows and macOS; sqlite3 on the command line works too. To restore, stop the
 service and put the file back at AVL_DB, and restore data_uploads alongside it.
+
+## Scheduled off-box backups
+    cp .env.backup.example .env.backup     # gitignored; holds URL + token
+    ./scripts/pull_backup.sh
+
+Pulls a full archive (database + documents) to AVL_BACKUP_DIR, named by
+timestamp, keeping AVL_BACKUP_KEEP (default 30). Point it at a synced folder and
+the backup is off the server and off this machine:
+
+    AVL_BACKUP_DIR=/mnt/c/Users/you/OneDrive/avl-backups
+
+Windows Task Scheduler, daily:
+
+    wsl bash /home/you/avl-manager/avl-manager/scripts/pull_backup.sh
+
+It refuses to overwrite a good backup with a bad one. curl -o will happily write
+a 404 page over yesterday's archive, so the script downloads to a temp file and
+only moves it into place after checking the response was 200, that it is a
+readable gzip, and that it actually contains a database. Any failure exits
+non-zero so a scheduler can alert, leaving the previous backup untouched.

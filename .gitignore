@@ -10,3 +10,10 @@ data_uploads/
 backups/
 .env
 *Zone.Identifier
+
+# local backup credentials
+.env.backup
+
+# pulled backups - these contain the whole dataset
+avl_full*.tar.gz
+avl_*.db
