@@ -1,17 +1,72 @@
 {% extends "base.html" %}{% block body %}
 <h2>Admin</h2>
+
+{% for w in warnings %}<p class="err"><b>Configuration warning:</b> {{ w }}</p>{% endfor %}
+{% set err = request.query_params.get('err') %}
+{% if err == 'domain' %}<p class="err">Only @{{ domain }} addresses can be added.</p>
+{% elif err == 'exists' %}<p class="err">That address is already on the list.</p>
+{% elif err == 'self' %}<p class="err">You cannot remove your own account.</p>
+{% elif err == 'lastadmin' %}<p class="err">That is the only admin left. Make someone else an admin first.</p>
+{% endif %}
+
 <div class="cols">
-<div class="card"><h3>Users & roles</h3>
-<table class="list"><tr><th>Email</th><th>Name</th><th>Role</th><th>Last login</th></tr>
-{% for u in users %}<tr><td>{{ u.email }}</td><td>{{ u.name }}</td>
-<td><form method="post" action="/admin/role" class="inline"><input type="hidden" name="email" value="{{ u.email }}">
-<select name="role"><option {% if u.role=='viewer' %}selected{% endif %}>viewer</option>
-<option {% if u.role=='editor' %}selected{% endif %}>editor</option>
-<option {% if u.role=='admin' %}selected{% endif %}>admin</option></select><button>Set</button></form></td>
-<td class="sub2">{{ u.last_login }}</td></tr>{% endfor %}</table>
-<p class="hint">viewer = read-only (good for execs), editor = can update, admin = this page. First user to sign in became admin; ADMIN_EMAILS env var also grants admin.</p></div>
-<div class="card"><h3>Backup</h3>
+<div class="card"><h3>Users &amp; roles</h3>
+<table class="list"><tr><th>Email</th><th>Name</th><th>Role</th><th>Last login</th><th></th></tr>
+{% for u in users %}<tr>
+<td>{{ u.email }}{% if u.email == user.email %} <span class="sub2">(you)</span>{% endif %}</td>
+<td>{{ u.name }}</td>
+<td><form method="post" action="/admin/role" class="inline">
+<input type="hidden" name="email" value="{{ u.email }}">
+<select name="role">{% for r in ['viewer','editor','admin'] %}<option {% if u.role==r %}selected{% endif %}>{{ r }}</option>{% endfor %}</select>
+<button>Set</button></form></td>
+<td class="sub2">{{ u.last_login[:16]|replace('T',' ') if u.last_login else 'never signed in' }}</td>
+<td>{% if u.email != user.email %}<form method="post" action="/admin/user/remove" class="inline"
+      onsubmit="return confirm('Remove {{ u.email }}?{% if not allowlist %} They can sign in again and be re-added as an editor, because the user list is not being enforced.{% endif %}')">
+<input type="hidden" name="email" value="{{ u.email }}"><button class="chipx" title="Remove">&times;</button></form>{% endif %}</td>
+</tr>{% endfor %}</table>
+
+<h3>Add someone</h3>
+<form method="post" action="/admin/user/add" class="row">
+<input name="email" type="email" placeholder="name@{{ domain }}" required size="24">
+<input name="name" placeholder="Full name" size="18">
+<select name="role"><option>viewer</option><option selected>editor</option><option>admin</option></select>
+<button>Add</button></form>
+<p class="hint">Adding someone here sets their role <em>before</em> they first sign in. Otherwise anyone
+signing in is created as an editor and you have to change it afterwards.</p>
+</div>
+
+<div class="card"><h3>Who can sign in</h3>
+<p>Mode: <b>{{ auth_mode }}</b>
+{% if auth_mode == 'dev' %}<br><span class="err">No password at all. Fine locally, never on a shared URL.
+Set AUTH_MODE=shared with SHARED_PASSWORD, or oidc for real SSO.</span>
+{% elif auth_mode == 'shared' %}<br><span class="sub2">One team-wide password plus an @{{ domain }} address.
+It identifies the team, not the person: the audit trail records whatever name and email someone types.</span>
+{% elif auth_mode == 'oidc' %}<br><span class="sub2">Single sign-on. Each person is who their identity provider says they are.</span>
+{% elif auth_mode == 'easyauth' %}<br><span class="sub2">The hosting platform authenticates before a request reaches the app.</span>
+{% endif %}</p>
+
+<p>User list: <b>{{ 'enforced' if allowlist else 'not enforced' }}</b><br>
+{% if allowlist %}<span class="sub2">Only addresses on the list above can sign in, so removing someone
+actually revokes their access.</span>
+{% else %}<span class="sub2">Anyone with an @{{ domain }} address{% if auth_mode == 'shared' %} and the team
+password{% endif %} can sign in and is created as an editor. Removing someone only resets their role.
+Set <code>REQUIRE_KNOWN_USER=1</code> to make this list the gate.</span>{% endif %}</p>
+
+<h3>How someone becomes admin</h3>
+<ol class="hint">
+<li>The first person to sign in to a new deployment &mdash; that was you.</li>
+<li>An admin sets their role to <b>admin</b> above. Add them first if they have not signed in yet.</li>
+<li>Their address is in the <code>ADMIN_EMAILS</code> environment variable, which always wins:
+{% if admin_emails %}<b>{{ admin_emails|join(', ') }}</b>{% else %}<span>currently empty</span>{% endif %}.
+Useful as a way back in if the last admin role is ever lost.</li>
+</ol>
+<p class="hint">There {{ 'is' if n_admins == 1 else 'are' }} <b>{{ n_admins }}</b>
+admin{{ '' if n_admins == 1 else 's' }}. The app will not let you remove or demote the last one.</p>
+
+<h3>Backup</h3>
 <a class="btn" href="/admin/backup">Download database backup</a>
-<p class="hint">Also see scripts/backup.sh for a nightly cron that keeps 30 rolling copies.</p>
-<h3>Auth</h3><p>Current mode: <b>{{ auth_mode }}</b>. For production set AUTH_MODE=oidc (Entra app registration) or easyauth (Azure App Service built-in auth). See README.</p></div>
-</div>{% endblock %}
+<p class="hint">A mounted disk is still one copy. Keep a backup somewhere else.
+scripts/backup.sh runs the same thing on a schedule.</p>
+</div>
+</div>
+{% endblock %}

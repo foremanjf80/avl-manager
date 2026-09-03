@@ -35,6 +35,25 @@ def shared_password_ok(supplied):
         return False
     return hmac.compare_digest(supplied or "", SHARED_PASSWORD)
 
+# With an allowlist on, knowing the team password is not enough: the address must
+# already be on the roster. That is what makes removing someone mean anything.
+REQUIRE_KNOWN_USER = os.environ.get("REQUIRE_KNOWN_USER", "") == "1"
+
+def user_known(email):
+    """True if this address may sign in. Open until the first user exists, so the
+    allowlist can never lock everyone out of a fresh deployment."""
+    if not REQUIRE_KNOWN_USER:
+        return True
+    if (email or "").lower() in ADMIN_EMAILS:
+        return True
+    from . import db
+    c = db.conn()
+    row = c.execute("SELECT (SELECT COUNT(*) FROM users) n, "
+                    "(SELECT COUNT(*) FROM users WHERE lower(email)=lower(?)) hit",
+                    (email,)).fetchone()
+    c.close()
+    return row["n"] == 0 or row["hit"] > 0
+
 def form_login_enabled():
     return AUTH_MODE in ("dev", "shared")
 
@@ -46,6 +65,9 @@ def startup_warnings():
         out.append("AUTH_MODE=dev behind TLS: anyone who reaches this URL can sign "
                    "in with any @%s address and no password. Set AUTH_MODE=oidc, or "
                    "AUTH_MODE=shared with SHARED_PASSWORD as a stopgap." % ALLOWED_DOMAIN)
+    if REQUIRE_KNOWN_USER and AUTH_MODE == "easyauth":
+        out.append("REQUIRE_KNOWN_USER has no effect in easyauth mode; the platform "
+                   "decides who reaches the app.")
     if AUTH_MODE == "shared" and not shared_password_configured():
         out.append("AUTH_MODE=shared but SHARED_PASSWORD is missing or shorter than "
                    "%d characters. All logins will be refused until it is set."

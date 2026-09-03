@@ -74,6 +74,10 @@ def login_dev(request: Request, name: str = Form(...), email: str = Form(...),
             _auth.note_login_failure(ip)
             db.log(email.lower().strip(), "login:failed", f"bad shared password from {ip}")
             return RedirectResponse("/login?error=password", status_code=303)
+    if not _auth.user_known(email):
+        _auth.note_login_failure(ip)
+        db.log(email.lower().strip(), "login:refused", f"not on the user list, from {ip}")
+        return RedirectResponse("/login?error=notinvited", status_code=303)
     _auth.clear_login_failures(ip)
     request.session["user"] = {"email": email.lower().strip(), "name": name.strip()}
     _touch_user(request.session["user"])
@@ -93,6 +97,9 @@ async def auth_callback(request: Request):
     email = (info.get("email") or info.get("preferred_username") or "").lower()
     if not domain_ok(email):
         return RedirectResponse("/login?error=domain", status_code=303)
+    if not _auth.user_known(email):
+        db.log(email, "login:refused", "not on the user list (sso)")
+        return RedirectResponse("/login?error=notinvited", status_code=303)
     request.session["user"] = {"email": email, "name": info.get("name", email.split("@")[0])}
     _touch_user(request.session["user"])
     return RedirectResponse("/", status_code=303)
@@ -1518,19 +1525,66 @@ def digest_preview(request: Request, user=Depends(require_user)):
 @app.get("/admin", response_class=HTMLResponse)
 def admin(request: Request, user=Depends(require_admin)):
     c = db.conn()
-    users = c.execute("SELECT * FROM users ORDER BY email").fetchall()
+    users = c.execute("SELECT * FROM users ORDER BY role, email").fetchall()
     c.close()
     return templates.TemplateResponse(request, "admin.html", {"user": user, "users": users,
-                                                              "auth_mode": AUTH_MODE})
+        "auth_mode": AUTH_MODE, "allowlist": _auth.REQUIRE_KNOWN_USER,
+        "admin_emails": sorted(_auth.ADMIN_EMAILS),
+        "n_admins": sum(1 for u in users if u["role"] == "admin"),
+        "warnings": _auth.startup_warnings(), "domain": ALLOWED_DOMAIN})
+
+@app.post("/admin/user/add")
+def admin_add_user(request: Request, email: str = Form(...), name: str = Form(""),
+                   role: str = Form("editor"), user=Depends(require_admin)):
+    """Pre-create someone so their role is right before they ever sign in."""
+    em = email.strip().lower()
+    if role not in ("viewer", "editor", "admin"):
+        role = "editor"
+    if not domain_ok(em):
+        return RedirectResponse("/admin?err=domain", status_code=303)
+    c = db.conn()
+    if c.execute("SELECT 1 FROM users WHERE lower(email)=?", (em,)).fetchone():
+        c.close()
+        return RedirectResponse("/admin?err=exists", status_code=303)
+    c.execute("INSERT INTO users(email, name, role) VALUES(?,?,?)",
+              (em, name.strip() or em.split("@")[0], role))
+    c.commit(); c.close()
+    db.log(user["email"], "user:add", f"{em} as {role}")
+    return RedirectResponse("/admin?ok=added", status_code=303)
+
+@app.post("/admin/user/remove")
+def admin_remove_user(request: Request, email: str = Form(...), user=Depends(require_admin)):
+    em = email.strip().lower()
+    if em == user["email"].lower():
+        return RedirectResponse("/admin?err=self", status_code=303)
+    c = db.conn()
+    row = c.execute("SELECT role FROM users WHERE lower(email)=?", (em,)).fetchone()
+    if not row:
+        c.close()
+        return RedirectResponse("/admin", status_code=303)
+    if row["role"] == "admin" and \
+       c.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0] <= 1:
+        c.close()
+        return RedirectResponse("/admin?err=lastadmin", status_code=303)
+    c.execute("DELETE FROM users WHERE lower(email)=?", (em,))
+    c.commit(); c.close()
+    db.log(user["email"], "user:remove", em)
+    return RedirectResponse("/admin?ok=removed", status_code=303)
 
 @app.post("/admin/role")
 def set_role(request: Request, email: str = Form(...), role: str = Form(...),
              user=Depends(require_admin)):
-    if role in ("viewer", "editor", "admin"):
-        c = db.conn()
-        c.execute("UPDATE users SET role=? WHERE email=?", (role, email))
-        c.commit(); c.close()
-        db.log(user["email"], "role", f"{email} -> {role}")
+    if role not in ("viewer", "editor", "admin"):
+        return RedirectResponse("/admin", status_code=303)
+    c = db.conn()
+    cur = c.execute("SELECT role FROM users WHERE email=?", (email,)).fetchone()
+    if cur and cur["role"] == "admin" and role != "admin" and \
+       c.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0] <= 1:
+        c.close()
+        return RedirectResponse("/admin?err=lastadmin", status_code=303)
+    c.execute("UPDATE users SET role=? WHERE email=?", (role, email))
+    c.commit(); c.close()
+    db.log(user["email"], "role", f"{email} -> {role}")
     return RedirectResponse("/admin", status_code=303)
 
 @app.get("/admin/backup")

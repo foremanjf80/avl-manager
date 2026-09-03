@@ -21,11 +21,11 @@ the dataroom is, what was last sent, and what is outstanding. Click a row for th
 <span class="sub2" style="align-self:center">{{ rows|length }} row{{ '' if rows|length==1 else 's' }}</span>
 </form>
 
-<table class="list"><tr><th>TPO / product</th><th>Status</th><th>Dataroom</th><th></th>
+<table class="list"><tr><th>TPO AVL</th><th>Product</th><th>Status</th><th>Dataroom</th><th></th>
 <th>Last package</th><th>Actions</th><th>IE</th><th>Owner</th><th>Target</th><th>Next milestone</th></tr>
 {% for r in rows %}<tr class="{{ 'overdue' if r.overdue_target }}">
-<td><a href="/pursuit/{{ r.l.avl_id }}/{{ r.l.product_id }}"><b>{{ r.l.avl_name }}</b></a>
-<div class="sub2">{{ r.l.product }}</div></td>
+<td><a href="/pursuit/{{ r.l.avl_id }}/{{ r.l.product_id }}"><b>{{ r.l.avl_name }}</b></a></td>
+<td>{{ r.l.product }} <span class="sub2">{{ r.l.category }}</span></td>
 <td><span class="ls ls-{{ r.l.status|replace(' ','')|replace(',','')|replace('/','') }}">{{ r.l.status }}</span>
 {% if r.l.condition %}<div class="sub2" title="{{ r.l.condition }}">{{ r.l.condition[:40] }}{% if r.l.condition|length > 40 %}&hellip;{% endif %}</div>{% endif %}</td>
 <td class="sub2">{% if r.rd.req %}{{ r.rd.done }}/{{ r.rd.req }} required{% if r.rd.accepted %} <span class="sub2">({{ r.rd.accepted }} accepted)</span>{% endif %}
@@ -41,7 +41,7 @@ the dataroom is, what was last sent, and what is outstanding. Click a row for th
 <td class="sub2">{{ r.l.owner or '-' }}</td>
 <td class="sub2 nowrap">{{ r.l.target_date or '-' }}</td>
 <td class="sub2">{{ r.l.next_milestone }}</td>
-</tr>{% else %}<tr><td colspan="10" class="hint">Nothing matches that view.</td></tr>{% endfor %}</table>
+</tr>{% else %}<tr><td colspan="11" class="hint">Nothing matches that view.</td></tr>{% endfor %}</table>
 <p class="hint">"Ready" means every Required requirement is Complete, Submitted or Accepted. Red rows are past
 their target listing date and not yet listed.</p>
 {% endblock %}

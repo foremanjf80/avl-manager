@@ -502,3 +502,23 @@ attachments and the uploaded files, keeping products, AVLs, the matrix, the
 roster, both template libraries and the audit log.
 
 A new deployment needs none of this: an empty disk seeds itself.
+
+## v27 - user management, and an optional user list
+The acceptance portfolio shows TPO and product as separate columns rather than
+the product stacked underneath in grey.
+
+/admin can now add and remove people, not only change the role of someone who has
+already signed in. Adding sets their role before their first sign-in, so they do
+not land as an editor and need correcting afterwards.
+
+Three ways to become admin, stated on the page: first to sign in to a new
+deployment; promoted by an admin; or listed in ADMIN_EMAILS, which always wins
+and is the way back in if the last admin role is ever lost. The app refuses to
+remove or demote the last admin.
+
+REQUIRE_KNOWN_USER=1 makes that list the gate: an address must already be on it
+to sign in, so removing someone actually revokes access. Without it - the default,
+and how it behaved before - anyone with a permitted address (and the team password
+in shared mode) signs in and is created as an editor, and removing them only
+resets their role. The admin page says which of the two is in force. The list is
+ignored while no users exist, so a fresh deployment can never lock everyone out.
