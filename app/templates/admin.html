@@ -64,9 +64,30 @@ Useful as a way back in if the last admin role is ever lost.</li>
 admin{{ '' if n_admins == 1 else 's' }}. The app will not let you remove or demote the last one.</p>
 
 <h3>Backup</h3>
-<a class="btn" href="/admin/backup">Download database backup</a>
-<p class="hint">A mounted disk is still one copy. Keep a backup somewhere else.
-scripts/backup.sh runs the same thing on a schedule.</p>
+<a class="btn" href="/admin/backup">Download database now</a>
+<p class="hint"><b>The database is not the documents.</b> It records the path of every
+uploaded file, not its contents, so a .db on its own restores the checklists, statuses and
+history but none of the {{ n_uploads }} file{{ '' if n_uploads == 1 else 's' }} on disk. Use the
+full archive below to capture both.</p>
+
+<p class="sub2"><b>Automatic snapshots</b> &mdash;
+{% if backup_hours %}one is taken when someone signs in if the newest is over {{ backup_hours|int }}h old,
+keeping the last {{ backup_keep }}.{% else %}disabled (AUTO_BACKUP_HOURS=0).{% endif %}</p>
+{% if snapshots %}
+<table class="list"><tr><th>Snapshot</th><th>Size</th><th></th></tr>
+{% for sn in snapshots %}<tr><td>{{ sn.name }}</td>
+<td class="sub2">{{ (sn.bytes / 1024)|round|int }} KB</td>
+<td><a href="/admin/backup/{{ sn.name }}">Download</a></td></tr>{% endfor %}</table>
+{% else %}<p class="hint">No snapshots yet &mdash; the first is taken on the next sign-in.</p>{% endif %}
+<p class="hint">They live on the same disk as the database, so they protect against deleting
+the wrong thing, not against losing the disk.</p>
+
+<p class="sub2"><b>Off-box pull</b> &mdash;
+{% if backup_token_set %}enabled. A scheduler anywhere can fetch a backup without signing in:
+<br><code>/backup/&lt;BACKUP_TOKEN&gt;</code> for the database,
+<br><code>/backup/&lt;BACKUP_TOKEN&gt;?full=1</code> for database <em>and</em> documents as a .tar.gz.
+{% else %}not configured. Set <code>BACKUP_TOKEN</code> (24+ characters) to let a scheduled job
+pull backups off this box without a login. Until then the route returns 404.{% endif %}</p>
 </div>
 </div>
 {% endblock %}

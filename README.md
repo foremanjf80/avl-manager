@@ -562,3 +562,30 @@ accepted sub-count beneath it.
 If anything is still too small, the sizes are all in app/static/style.css - the
 muted text is .sub2 and .hint, and the stylesheet is cache-busted by mtime so a
 change reaches the browser on the next load.
+
+## v30 - backups that cover the documents too
+The database records the *path* of every uploaded file, not its contents. A .db
+backup therefore restores checklists, statuses, packages and history but none of
+the documents. Both are needed.
+
+Automatic snapshots. On sign-in, if the newest snapshot is older than
+AUTO_BACKUP_HOURS (default 24) one is taken beside the database, keeping
+AUTO_BACKUP_KEEP (default 14). Driven by activity rather than cron because a
+Render disk mounts to one service only, so a separate cron job cannot see this
+database. Failure never blocks a login. Set AUTO_BACKUP_HOURS=0 to disable.
+Snapshots use SQLite's backup API, which is consistent in WAL mode where a file
+copy is not, and are listed and downloadable on /admin.
+
+Off-box pull. Snapshots live on the same disk as the database, so they protect
+against deleting the wrong thing, not against losing the disk. Set BACKUP_TOKEN
+(24+ characters) and a scheduler anywhere can fetch without signing in:
+
+    /backup/<token>          the database
+    /backup/<token>?full=1   database AND documents, as .tar.gz
+
+With no token set the route 404s, and a wrong token 404s identically. Treat the
+token as a password: it returns the entire dataset.
+
+Reading a .db: DB Browser for SQLite (sqlitebrowser.org) is the usual free GUI on
+Windows and macOS; sqlite3 on the command line works too. To restore, stop the
+service and put the file back at AVL_DB, and restore data_uploads alongside it.

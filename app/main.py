@@ -1,5 +1,5 @@
 import os, datetime
-from fastapi import FastAPI, Request, Form, Depends
+from fastapi import FastAPI, Request, Form, Depends, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -110,6 +110,10 @@ def logout(request: Request):
     return RedirectResponse("/login", status_code=303)
 
 def _touch_user(user):
+    # A login is a good moment to check whether today's snapshot exists: it is
+    # infrequent, it happens before anyone edits anything, and it needs no
+    # scheduler. auto_backup() is a no-op if one was taken recently.
+    db.auto_backup()
     c = db.conn()
     if c.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
         c.execute("INSERT INTO users(email, name, role, last_login) VALUES(?,?, 'admin', ?)",
@@ -1527,7 +1531,11 @@ def admin(request: Request, user=Depends(require_admin)):
     c = db.conn()
     users = c.execute("SELECT * FROM users ORDER BY role, email").fetchall()
     c.close()
+    snaps = db.list_snapshots()[:10]
     return templates.TemplateResponse(request, "admin.html", {"user": user, "users": users,
+        "snapshots": snaps, "backup_hours": db.AUTO_BACKUP_HOURS,
+        "backup_keep": db.AUTO_BACKUP_KEEP, "backup_dir": db.BACKUP_DIR,
+        "backup_token_set": bool(_auth.BACKUP_TOKEN), "n_uploads": _upload_count(),
         "auth_mode": AUTH_MODE, "allowlist": _auth.REQUIRE_KNOWN_USER,
         "admin_emails": sorted(_auth.ADMIN_EMAILS),
         "n_admins": sum(1 for u in users if u["role"] == "admin"),
@@ -1586,6 +1594,57 @@ def set_role(request: Request, email: str = Form(...), role: str = Form(...),
     c.commit(); c.close()
     db.log(user["email"], "role", f"{email} -> {role}")
     return RedirectResponse("/admin", status_code=303)
+
+def _upload_count():
+    try:
+        return sum(1 for n in os.listdir(UPLOAD_DIR)
+                   if os.path.isfile(os.path.join(UPLOAD_DIR, n)))
+    except OSError:
+        return 0
+
+@app.get("/admin/backup/{name}")
+def admin_backup_download(name: str, request: Request, user=Depends(require_admin)):
+    """Download one of the automatic snapshots."""
+    safe = os.path.basename(name)
+    path = os.path.join(db.BACKUP_DIR, safe)
+    if not (safe.startswith("avl_") and safe.endswith(".db") and os.path.exists(path)):
+        return RedirectResponse("/admin", status_code=303)
+    return FileResponse(path, filename=safe)
+
+@app.get("/backup/{token}")
+def backup_pull(token: str, request: Request, full: int = 0):
+    """Unattended backup for a scheduler outside this box.
+
+    Guarded by a long shared token rather than a session, because the point is to
+    be fetchable by cron from somewhere else. Off by default: with no BACKUP_TOKEN
+    set this route does not exist as far as a caller can tell.
+
+    full=1 returns database *and* documents. The database alone is not a complete
+    backup - it stores the path of each attachment, not its contents.
+    """
+    if not _auth.backup_token_ok(token):
+        raise HTTPException(status_code=404)
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    from starlette.background import BackgroundTask
+    import tempfile
+    if not full:
+        fd, tmp = tempfile.mkstemp(prefix="pull_", suffix=".db"); os.close(fd)
+        db.snapshot(tmp)
+        db.log("backup-token", "backup:pull", f"database only ({os.path.getsize(tmp)} bytes)")
+        return FileResponse(tmp, filename=f"avl_{stamp}.db", media_type="application/octet-stream",
+                            background=BackgroundTask(lambda: os.path.exists(tmp) and os.remove(tmp)))
+    import tarfile
+    fd, tmpdb = tempfile.mkstemp(prefix="pull_", suffix=".db"); os.close(fd)
+    db.snapshot(tmpdb)
+    fd, tar = tempfile.mkstemp(prefix="pull_", suffix=".tar.gz"); os.close(fd)
+    with tarfile.open(tar, "w:gz") as t:
+        t.add(tmpdb, arcname=f"avl_{stamp}/avl.db")
+        if os.path.isdir(UPLOAD_DIR):
+            t.add(UPLOAD_DIR, arcname=f"avl_{stamp}/data_uploads")
+    os.remove(tmpdb)
+    db.log("backup-token", "backup:pull", f"full archive ({os.path.getsize(tar)} bytes)")
+    return FileResponse(tar, filename=f"avl_full_{stamp}.tar.gz", media_type="application/gzip",
+                        background=BackgroundTask(lambda: os.path.exists(tar) and os.remove(tar)))
 
 @app.get("/admin/backup")
 def backup(request: Request, user=Depends(require_admin)):

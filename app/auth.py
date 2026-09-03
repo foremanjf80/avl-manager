@@ -54,6 +54,16 @@ def user_known(email):
     c.close()
     return row["n"] == 0 or row["hit"] > 0
 
+# A long shared token so a scheduler elsewhere can pull a backup without a
+# session. Short or unset means the route does not exist.
+BACKUP_TOKEN = os.environ.get("BACKUP_TOKEN", "")
+MIN_BACKUP_TOKEN = 24
+
+def backup_token_ok(supplied):
+    if len(BACKUP_TOKEN) < MIN_BACKUP_TOKEN:
+        return False
+    return hmac.compare_digest(supplied or "", BACKUP_TOKEN)
+
 def form_login_enabled():
     return AUTH_MODE in ("dev", "shared")
 

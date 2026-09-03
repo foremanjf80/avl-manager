@@ -997,3 +997,67 @@ def ie_report_progress(c, report_ids):
                         "n": r["n"], "done": r["done"],
                         "pct": round(100 * r["done"] / r["n"]) if r["n"] else 0}
     return out
+
+
+# ---------------- automatic backups (v30) ----------------
+# Snapshots live beside the database, so on a hosted box they land on the same
+# persistent disk. That protects against someone deleting the wrong thing; it
+# does NOT protect against losing the disk. For that, pull one off the box - see
+# the token endpoint in main.py.
+BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(DB_PATH)) or ".", "backups")
+AUTO_BACKUP_HOURS = float(os.environ.get("AUTO_BACKUP_HOURS", "24") or 0)
+AUTO_BACKUP_KEEP = int(os.environ.get("AUTO_BACKUP_KEEP", "14") or 14)
+
+def snapshot(dest=None):
+    """A consistent copy, safe to take while the app is running.
+
+    Uses SQLite's backup API rather than copying the file: in WAL mode recent
+    commits live in the -wal sidecar and a plain copy would silently omit them.
+    """
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    dest = dest or os.path.join(
+        BACKUP_DIR, "avl_%s.db" % datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+    src = sqlite3.connect(DB_PATH)
+    dst = sqlite3.connect(dest)
+    with dst:
+        src.backup(dst)
+    src.close(); dst.close()
+    return dest
+
+def list_snapshots():
+    if not os.path.isdir(BACKUP_DIR):
+        return []
+    out = []
+    for n in os.listdir(BACKUP_DIR):
+        if n.startswith("avl_") and n.endswith(".db"):
+            p = os.path.join(BACKUP_DIR, n)
+            out.append({"name": n, "path": p, "bytes": os.path.getsize(p),
+                        "mtime": os.path.getmtime(p)})
+    return sorted(out, key=lambda r: r["mtime"], reverse=True)
+
+def prune_snapshots(keep=None):
+    keep = AUTO_BACKUP_KEEP if keep is None else keep
+    for old in list_snapshots()[keep:]:
+        try:
+            os.remove(old["path"])
+        except OSError:
+            pass
+
+def auto_backup():
+    """Take one if the newest is older than the interval. Cheap to call often.
+
+    Driven by activity rather than a scheduler, because a single web service has
+    nowhere to run cron: a Render disk mounts to one service only, so a separate
+    cron job cannot see this database.
+    """
+    if AUTO_BACKUP_HOURS <= 0:
+        return None
+    newest = list_snapshots()
+    if newest and (datetime.datetime.now().timestamp() - newest[0]["mtime"]) < AUTO_BACKUP_HOURS * 3600:
+        return None
+    try:
+        path = snapshot()
+    except Exception:
+        return None            # a backup failing must never block a login
+    prune_snapshots()
+    return path
