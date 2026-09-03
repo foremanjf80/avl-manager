@@ -25,10 +25,10 @@ the dataroom is, what was last sent, and what is outstanding. Click a row for th
 <th>Last package</th><th>Actions</th><th>IE</th><th>Owner</th><th>Target</th><th>Next milestone</th></tr>
 {% for r in rows %}<tr class="{{ 'overdue' if r.overdue_target }}">
 <td><a href="/pursuit/{{ r.l.avl_id }}/{{ r.l.product_id }}"><b>{{ r.l.avl_name }}</b></a></td>
-<td>{{ r.l.product }} <span class="sub2">{{ r.l.category }}</span></td>
-<td><span class="ls ls-{{ r.l.status|replace(' ','')|replace(',','')|replace('/','') }}">{{ r.l.status }}</span>
-{% if r.l.condition %}<div class="sub2" title="{{ r.l.condition }}">{{ r.l.condition[:40] }}{% if r.l.condition|length > 40 %}&hellip;{% endif %}</div>{% endif %}</td>
-<td class="sub2">{% if r.rd.req %}{{ r.rd.done }}/{{ r.rd.req }} required{% if r.rd.accepted %} <span class="sub2">({{ r.rd.accepted }} accepted)</span>{% endif %}
+<td class="prodcell">{{ r.l.product }}<div class="sub2">{{ r.l.category }}</div></td>
+<td class="statuscell"><span class="ls ls-{{ r.l.status|replace(' ','')|replace(',','')|replace('/','') }}">{{ r.l.status }}</span>
+{% if r.l.condition %}<div class="cond" title="{{ r.l.condition }}">{{ r.l.condition[:44] }}{% if r.l.condition|length > 44 %}&hellip;{% endif %}</div>{% endif %}</td>
+<td class="dataroomcell">{% if r.rd.req %}<b>{{ r.rd.done }}/{{ r.rd.req }}</b> required{% if r.rd.accepted %}<div class="sub2">{{ r.rd.accepted }} accepted</div>{% endif %}
 {% else %}<span class="hint">no checklist</span>{% endif %}</td>
 <td class="barcell">{% if r.rd.pct is not none %}<span class="bar"><i style="width:{{ r.rd.pct }}%" class="{{ 'full' if r.rd.pct==100 else '' }}"></i></span>
 {% if r.rd.ready %}<span class="chip ready">ready</span>{% endif %}

@@ -1,43 +1,56 @@
 :root{--navy:#1F3864;--blue:#2E5395;--lt:#F2F2F2}
-*{box-sizing:border-box}body{margin:0;font-family:Calibri,system-ui,sans-serif;color:#333}
+*{box-sizing:border-box}
+/* Legibility: text is a little larger and greys are a lot darker than the
+   defaults this started with. Every muted colour below clears WCAG AA (4.5:1)
+   on white; the old #999 managed 2.85:1, which is hard work for anyone and
+   genuinely difficult with a corneal condition. */
+body{margin:0;font-family:Calibri,system-ui,sans-serif;color:#222;
+  font-size:15px;line-height:1.5}
 header{display:flex;align-items:center;gap:24px;background:var(--navy);color:#fff;padding:10px 18px}
-.brand{font-size:18px}header nav a{color:#cfe0f5;margin-right:14px;text-decoration:none}
+.brand{font-size:18px}header nav a{color:#e2edfa;margin-right:14px;text-decoration:none;font-size:15px}
 header nav a:hover{color:#fff}
-header nav a.active{color:#fff;font-weight:bold;border-bottom:3px solid #7EC8E3;padding-bottom:4px}.who{margin-left:auto;font-size:13px}.who a{color:#cfe0f5}
+header nav a.active{color:#fff;font-weight:bold;border-bottom:3px solid #7EC8E3;padding-bottom:4px}.who{margin-left:auto;font-size:13.5px}.who a{color:#e2edfa}
 main{padding:18px 22px}h2{color:var(--navy);margin:6px 0 12px}
 .card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:16px;margin-bottom:16px}
 .narrow{max-width:420px;margin:60px auto}.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:1100px){.cols{grid-template-columns:1fr}}
-label{display:block;margin:8px 0}input,select{padding:6px;border:1px solid #bbb;border-radius:4px}
+label{display:block;margin:8px 0}
+input,select,textarea{padding:6px;border:1px solid #999;border-radius:4px;
+  font-size:14px;color:#222;font-family:inherit}
 button,.btn{background:var(--blue);color:#fff;border:0;border-radius:4px;padding:7px 12px;cursor:pointer;text-decoration:none;display:inline-block}
-.err{color:#b00020}.hint{color:#777;font-size:12px;font-style:italic}
-.scroll{overflow-x:auto}table{border-collapse:collapse;font-size:12.5px}
-.matrix th,.matrix td{border:1px solid #ccc;padding:4px 6px;text-align:center;min-width:110px}
+.err{color:#a5001c;font-weight:bold}
+/* Not italic: slanted text is harder to resolve when vision is distorted. */
+.hint{color:#444;font-size:13.5px;line-height:1.5}
+.scroll{overflow-x:auto}table{border-collapse:collapse;font-size:14px}
+.matrix th,.matrix td{border:1px solid #bbb;padding:6px 7px;text-align:center;min-width:120px}
 .matrix thead th{background:var(--navy);color:#fff;position:sticky;top:0}
 .matrix .pname{text-align:left;font-weight:bold;color:var(--navy);min-width:230px}
-.sub{font-weight:normal;font-size:10.5px;color:#9db4d6}.pname .sub{color:#888}
+.sub{font-weight:normal;font-size:12px;color:#dce9f7}.pname .sub{color:#444}
 .matrix tr.cat td{background:#DCE6F1;color:var(--navy);font-weight:bold;text-align:left}
-.matrix select{width:100%;border:0;background:transparent;font-size:12px}
+.matrix select{width:100%;border:0;background:transparent;font-size:13.5px;color:#222}
 .s-Listed{background:#C6EFCE}.s-InReview{background:#BDD7EE}.s-Execution{background:#A8F0EA}
 .s-Engagement{background:#FCD9C4}.s-Opportunity{background:#FCE4D6}.s-NoInterest{background:#F8CBAD}
 .s-NoInfo{background:#FFF2CC}.s-NA{background:#fff}.s-Prelaunch{background:#EDEDED}
-.list th,.list td{border-bottom:1px solid #e3e3e3;padding:6px 8px;text-align:left;font-size:13px}
+.list th,.list td{border-bottom:1px solid #d8d8d8;padding:8px 9px;text-align:left;
+  font-size:14px;line-height:1.45}
 .list th{color:var(--navy)}.inline{display:inline-flex;gap:6px}.row{display:flex;gap:8px;flex-wrap:wrap}
 tr.inactive{opacity:.45}
 
 .kpis{display:flex;gap:14px;margin:10px 0 16px;flex-wrap:wrap}
-.kpi{background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 18px;min-width:150px;color:#555}
+.kpi{background:#fff;border:1px solid #ccc;border-radius:8px;padding:13px 18px;
+  min-width:150px;color:#333;font-size:14px}
 .kpi .n{font-size:28px;font-weight:bold;color:#1F3864}
 .kpi.win{border-color:#7fbf7f;background:#f2fbf2}.kpi.risk{border-color:#e0a08a;background:#fdf4f0}
-.sub2{color:#999;font-size:11px}
+.sub2{color:#444;font-size:13px}
 @media print{header,form,button{display:none!important}main{padding:0}}
 
-.chip{display:inline-block;font-size:9.5px;padding:1px 7px;border-radius:9px;vertical-align:middle;font-weight:normal}
+.chip{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:9px;
+  vertical-align:middle;font-weight:bold}
 .chip.roadmap{background:#FCE4D6;color:#8a4b1f;border:1px solid #e8b48c}
-.chip.eol{background:#e6e6e6;color:#777;border:1px solid #ccc}
+.chip.eol{background:#e2e2e2;color:#3d3d3d;border:1px solid #b8b8b8}
 
-.btn.small{padding:4px 9px;font-size:11.5px}
-.notelink{color:#c9c9c9;text-decoration:none;font-size:11px;margin-left:2px}
+.btn.small{padding:6px 11px;font-size:13px}
+.notelink{color:#5a6a7a;text-decoration:none;font-size:15px;margin-left:4px}
 .notelink.hasnote{color:#1F3864;font-weight:bold}
 tr.overdue{background:#fdeeee}tr.overdue td:first-child{color:#b00020;font-weight:bold}
 select.cs-Blocked{background:#F8CBAD}select.cs-InProgress{background:#BDD7EE}
@@ -47,14 +60,14 @@ tr.attrow td{border-top:0;padding-top:2px;padding-bottom:8px}
 tr.attrow input[type=file]{font-size:11px}
 h3.grp{margin:18px 0 4px;padding-bottom:4px;border-bottom:2px solid var(--navy);font-size:15px}
 h3.grp .sub2{margin-left:10px;font-weight:normal}
-.ob{font-size:10px;padding:1px 5px;border-radius:3px;white-space:nowrap}
+.ob{font-size:11.5px;padding:2px 7px;border-radius:3px;white-space:nowrap;font-weight:bold}
 .ob-Required{background:#fde8e8;color:#a02020}
 .ob-Conditional{background:#fff4e0;color:#8a5a00}
-.ob-Optional{background:#eef3f7;color:#5a6a7a}
+.ob-Optional{background:#eef3f7;color:#3d4a57}
 .chip.primary{background:var(--navy);color:#fff;font-size:10px;padding:1px 5px;border-radius:3px}
 td.nowrap{white-space:nowrap}
 td.nowrap a{text-decoration:none;font-size:15px;margin-right:4px}
-table.track td,table.track th{padding:3px 8px;font-size:12px}
+table.track td,table.track th{padding:5px 9px;font-size:13.5px}
 table.track tr.totals td{border-top:2px solid var(--navy);font-size:13px}
 .barcell{width:130px}
 .bar{display:inline-block;width:80px;height:8px;background:#e6e9ee;border-radius:4px;overflow:hidden;vertical-align:middle}
@@ -66,22 +79,22 @@ a.pkgbtn{float:right;font-size:12px;font-weight:normal;text-decoration:none;back
 tr.gap td{background:#fff6f6}
 .callform .fgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .callform .fgrid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
-.callform label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#555}
+.callform label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#333}
 .callform label.full{margin-top:10px}
 .callform select[multiple]{min-height:96px}
 .callform textarea{font:inherit;padding:6px;border:1px solid #ccc;border-radius:4px;resize:vertical;width:100%}
 .callform textarea:focus,.callform input:focus,.callform select:focus{outline:2px solid #7EC8E3;outline-offset:-1px}
 .callform .row{margin-top:10px}
 @media(max-width:900px){.callform .fgrid{grid-template-columns:1fr 1fr}.callform .fgrid2{grid-template-columns:1fr}}
-table.calls td.wrap{white-space:pre-wrap;max-width:280px;vertical-align:top;font-size:12px}
+table.calls td.wrap{white-space:pre-wrap;max-width:300px;vertical-align:top;font-size:13.5px}
 table.calls td{vertical-align:top}
-td.atts{font-size:11px;max-width:180px}
-td.atts .side{display:inline-block;min-width:38px;font-size:9px;padding:0 4px;border-radius:3px;
+td.atts{font-size:12.5px;max-width:200px}
+td.atts .side{display:inline-block;min-width:42px;font-size:11px;font-weight:bold;padding:0 4px;border-radius:3px;
   background:#e8eef5;color:var(--navy);margin-right:3px}
 td.atts .side.tpo{background:#f2e8f5;color:#6a3b7a}
 td.editcell{background:#f7f9fc;padding:12px}
 .actform .fgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px}
-.actform label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#555}
+.actform label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#333}
 .actform textarea{font:inherit;padding:6px;border:1px solid #ccc;border-radius:4px;resize:vertical;width:100%}
 .actform .row{margin-top:10px}
 @media(max-width:900px){.actform .fgrid{grid-template-columns:1fr}}
@@ -92,34 +105,34 @@ form.picker select{max-width:260px}
 td.repcell{min-width:300px}
 .repwrap{display:flex;flex-wrap:wrap;align-items:center;gap:5px}
 .chipform{display:inline-flex}
-.chip.person{display:inline-flex;align-items:center;gap:3px;background:#e8eef5;color:var(--navy);
-  border:1px solid #c9d7e6;border-radius:11px;padding:1px 3px 1px 9px;font-size:12px;
-  line-height:18px;white-space:nowrap}
+.chip.person{display:inline-flex;align-items:center;gap:4px;background:#e8eef5;color:var(--navy);
+  border:1px solid #b7cade;border-radius:12px;padding:2px 4px 2px 10px;font-size:13px;
+  line-height:20px;white-space:nowrap}
 /* Own class so the global button rule can never win. */
-button.chipx{background:none;border:0;color:#7d8a99;font:inherit;font-size:13px;line-height:16px;
+button.chipx{background:none;border:0;color:#4a5a68;font:inherit;font-size:13px;line-height:16px;
   width:16px;height:16px;min-width:16px;padding:0;margin:0;border-radius:50%;cursor:pointer;
   display:inline-flex;align-items:center;justify-content:center}
 button.chipx:hover{background:#b00020;color:#fff}
 form.addrep{display:inline-flex}
-form.addrep select{font-size:12px;padding:2px 4px;color:#5a6a7a;border:1px dashed #a9b6c4;
+form.addrep select{font-size:13px;padding:2px 4px;color:#5a6a7a;border:1px dashed #a9b6c4;
   background:#fff;border-radius:11px;max-width:160px;line-height:16px}
 /* A conditional listing reads as listed, but visibly flagged. */
 .s-ListedConditional{background:#C6EFCE;background-image:repeating-linear-gradient(135deg,
   rgba(255,193,7,.28) 0 6px, transparent 6px 12px)}
 .s-ListedConditional select{font-weight:bold}
 .chip.cond{background:#fff4e0;color:#8a5a00;border:1px solid #e8c98c;font-size:10px;padding:0 5px}
-.ls{font-size:9.5px;padding:1px 6px;border-radius:9px;margin-left:5px;white-space:nowrap;
-  border:1px solid transparent}
-.ls-Listed{background:#C6EFCE;color:#1e6b34;border-color:#a5ddb6}
-.ls-ListedConditional{background:#fff4e0;color:#8a5a00;border-color:#e8c98c}
+.ls{font-size:12px;padding:2px 9px;border-radius:10px;white-space:nowrap;
+  border:1px solid transparent;font-weight:bold;display:inline-block}
+.ls-Listed{background:#C6EFCE;color:#14532b;border-color:#8ecb9f}
+.ls-ListedConditional{background:#fff4e0;color:#6d4700;border-color:#dbb463}
 .ls-InReview{background:#BDD7EE;color:#1F3864;border-color:#9dbedd}
 .ls-Execution{background:#A8F0EA;color:#0f5e58}
 .ls-Engagement,.ls-Opportunity{background:#FCE4D6;color:#8a4b1f}
 .ls-NoInterest{background:#F8CBAD;color:#8a3b1f}
-.ls-NoInfo,.ls-Nottracked,.ls-NA,.ls-Prelaunch{background:#EDEDED;color:#777}
+.ls-NoInfo,.ls-Nottracked,.ls-NA,.ls-Prelaunch{background:#e4e4e4;color:#3d3d3d}
 .liveStatus.ok{color:#1e6b34}
-.ak{font-size:9.5px;padding:1px 6px;border-radius:9px;white-space:nowrap;border:1px solid #dde3ea;
-  background:#f2f5f8;color:#5a6a7a}
+.ak{font-size:11.5px;padding:2px 8px;border-radius:9px;white-space:nowrap;
+  border:1px solid #ccd5df;background:#eef2f6;color:#33414f;font-weight:bold}
 .ak-status{background:#dff0e0;color:#1e6b34;border-color:#bcdcc0}
 .ak-dataroom{background:#e6eef8;color:#1F3864;border-color:#c6d8ee}
 .ak-package{background:#efe6f8;color:#5a2f7a;border-color:#d8c6ee}
@@ -133,15 +146,23 @@ table.act td{vertical-align:top}
 @media(max-width:1200px){.pursuit .cols3{grid-template-columns:1fr 1fr}}
 @media(max-width:800px){.pursuit .cols3{grid-template-columns:1fr}}
 .pgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-.pgrid label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#555}
+.pgrid label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#333}
 @media(max-width:900px){.pgrid{grid-template-columns:1fr 1fr}}
 .bignum{font-size:22px;font-weight:bold;color:var(--navy)}
 select.cs-Submitted{background:#BDD7EE}select.cs-Accepted{background:#C6EFCE;font-weight:bold}
 form.bulkrow{margin:4px 0 6px;padding:4px 8px;background:#f7f9fc;border-radius:5px}
-form.bulkrow select,form.bulkrow input{font-size:12px;padding:2px 4px}
-form.bulkrow button{padding:3px 9px;font-size:11.5px}
-a.ielink{font-size:11px;text-decoration:none;background:#e0f2f1;color:#0f5e58;border:1px solid #bfe3e0;
+form.bulkrow select,form.bulkrow input{font-size:13px;padding:3px 5px}
+form.bulkrow button{padding:4px 10px;font-size:13px}
+a.ielink{font-size:12.5px;text-decoration:none;background:#e0f2f1;color:#0f5e58;border:1px solid #bfe3e0;
   border-radius:10px;padding:1px 7px;margin-left:6px;white-space:nowrap}
 a.ielink:hover{background:#0f5e58;color:#fff}
-form.ielinkform select{font-size:11px;padding:1px 4px;color:#5a6a7a;border:1px dashed #a9b6c4;
+form.ielinkform select{font-size:12.5px;padding:1px 4px;color:#5a6a7a;border:1px dashed #a9b6c4;
   border-radius:10px;background:#fff;max-width:190px}
+
+/* AVL Acceptance: the two columns read most often, sized to be read at a glance. */
+td.statuscell{white-space:nowrap}
+td.statuscell .cond{color:#444;font-size:12.5px;margin-top:3px;white-space:normal;max-width:230px}
+td.dataroomcell{font-size:15px;white-space:nowrap}
+td.dataroomcell b{font-size:16px;color:var(--navy)}
+td.prodcell{font-size:14.5px;min-width:200px}
+td.prodcell .sub2{margin-top:2px}
