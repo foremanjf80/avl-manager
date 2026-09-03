@@ -538,3 +538,27 @@ Disk budgeting on 1 GB: evidence documents dominate, and every built package is 
 stored zip of the documents it contains, so packages roughly double the space a
 dataroom occupies. Delete superseded packages from /dataroom/package when they are
 no longer needed. Render disks can be grown but not shrunk.
+
+## v29 - legibility
+A readability pass rather than a restyle. Every muted colour in the app failed
+WCAG AA contrast on white - the small grey used on almost every page was #999 at
+2.85:1, where 4.5:1 is the minimum - and the type was small with it.
+
+  .sub2        #999 11px     ->  #444 13px       2.85 -> 9.74
+  .hint        #777 12px     ->  #444 13.5px     4.48 -> 9.74, italic dropped
+  body         #333          ->  #222 15px, line-height 1.5
+  tables       12.5-13px     ->  14px, more row padding
+  badges       9.5-10px      ->  11.5-12px, bold, darker
+  note pencil  #c9c9c9 11px  ->  #5a6a7a 15px    1.66 -> 5.56
+
+Italics are gone from .hint: slanted text is harder to resolve when vision is
+distorted. Ratios were computed rather than eyeballed, on white and on each
+chip's own background.
+
+On AVL Acceptance the two columns read most often are stepped up further: listing
+status is a full-size bold chip, and the dataroom count is 16px bold navy with the
+accepted sub-count beneath it.
+
+If anything is still too small, the sizes are all in app/static/style.css - the
+muted text is .sub2 and .hint, and the stylesheet is cache-busted by mtime so a
+change reaches the browser on the next load.
