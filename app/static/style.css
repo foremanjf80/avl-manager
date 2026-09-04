@@ -166,3 +166,11 @@ td.dataroomcell{font-size:15px;white-space:nowrap}
 td.dataroomcell b{font-size:16px;color:var(--navy)}
 td.prodcell{font-size:14.5px;min-width:200px}
 td.prodcell .sub2{margin-top:2px}
+.due{font-size:12.5px;color:#444;white-space:nowrap}
+.due-soon{color:#8a5a00;font-weight:bold}
+.due-over{color:#a5001c;font-weight:bold}
+.cs{font-size:11.5px;padding:2px 8px;border-radius:9px;font-weight:bold;white-space:nowrap}
+.cs-Planned{background:#e6eef8;color:#1F3864;border:1px solid #c6d8ee}
+.cs-Met{background:#dff0e0;color:#14532b;border:1px solid #bcdcc0}
+.cs-Missed{background:#fbe3e3;color:#a5001c;border:1px solid #eec2c2}
+.cs-Cancelled{background:#eee;color:#3d3d3d;border:1px solid #ccc}

@@ -3022,7 +3022,12 @@ def _pursuit_row(c, avl_id, product_id):
     last = c.execute("SELECT MAX(ts) t FROM (SELECT ts FROM audit WHERE avl_id=? AND product_id=? "
                      "UNION ALL SELECT ts FROM status_history WHERE avl_id=? AND product_id=?)",
                      (avl_id, product_id, avl_id, product_id)).fetchone()["t"]
+    nxt = c.execute("SELECT * FROM commitments WHERE avl_id=? AND product_id=? "
+                    "AND status='Planned' ORDER BY due_date LIMIT 1",
+                    (avl_id, product_id)).fetchone()
     return {"listing": li, "rd": rd, "pkg": pkg, "ie": ie,
+            "next_commit": nxt,
+            "next_state": db.commitment_state(nxt, today) if nxt else None,
             "open_actions": acts["n"] or 0, "overdue_actions": acts["od"] or 0,
             "last_activity": last,
             "overdue_target": bool(li and li["target_date"] and li["target_date"] < today
@@ -3095,12 +3100,15 @@ def pursuit(avl_id: int, product_id: int, request: Request, user=Depends(require
                           "ORDER BY is_primary DESC, name", (avl_id,)).fetchall()
     packages_ = c.execute("SELECT * FROM packages WHERE avl_id=? AND product_id=? "
                           "ORDER BY revision DESC LIMIT 5", (avl_id, product_id)).fetchall()
+    commits = _commitment_rows(c, "WHERE cm.avl_id=? AND cm.product_id=? ",
+                               (avl_id, product_id), limit=20)
     feed = _activity(c, avl=avl_id, product=product_id, limit=20)
     people = c.execute("SELECT id, name, org FROM people WHERE active=1 ORDER BY name").fetchall()
     c.close()
     return templates.TemplateResponse(request, "pursuit.html", {"user": user, "a": a, "p": p,
         "d": d, "l": d["listing"], "gaps": gaps, "acts": acts, "calls": calls_,
         "contacts": contacts_, "packages": packages_, "feed": feed, "people": people,
+        "commits": commits, "kinds": db.COMMITMENT_KINDS,
         "today": today, "statuses": db.STATUSES, "priorities": db.PURSUIT_PRIORITIES,
         "types": db.ACTIVITY_TYPES})
 
@@ -3130,3 +3138,180 @@ def pursuit_save(avl_id: int, product_id: int, request: Request,
     db.log(user["email"], "pursuit:save", next_milestone.strip()[:60] or "details updated",
            avl_id=avl_id, product_id=product_id, entity="listing")
     return RedirectResponse(f"/pursuit/{avl_id}/{product_id}", status_code=303)
+
+# ---------------- 14) schedule: dated commitments ----------------
+def _commitment_rows(c, where="", args=(), limit=300):
+    """Commitments with the pursuit's readiness attached, so a date can be read
+    against what is actually outstanding rather than on its own."""
+    rows = c.execute(
+        "SELECT cm.*, a.name AS avl_name, p.name AS product, p.category, "
+        "pe.name AS owner_name, l.status AS listing_status "
+        "FROM commitments cm JOIN avls a ON a.id=cm.avl_id "
+        "JOIN products p ON p.id=cm.product_id "
+        "LEFT JOIN people pe ON pe.id=cm.owner_person_id "
+        "LEFT JOIN listings l ON l.avl_id=cm.avl_id AND l.product_id=cm.product_id "
+        f"{where} ORDER BY CASE cm.status WHEN 'Planned' THEN 0 ELSE 1 END, "
+        "cm.due_date, a.name LIMIT ?", list(args) + [limit]).fetchall()
+    today = datetime.date.today().isoformat()
+    out = []
+    for r in rows:
+        rd = _pursuit_readiness(c, r["avl_id"], r["product_id"])
+        n_open = c.execute("SELECT COUNT(*) FROM actions WHERE avl_id=? AND product_id=? "
+                           "AND status='Open'", (r["avl_id"], r["product_id"])).fetchone()[0]
+        out.append({"c": r, "rd": rd, "open_actions": n_open,
+                    **db.commitment_state(r, today)})
+    return out
+
+@app.get("/schedule", response_class=HTMLResponse)
+def schedule(request: Request, show: str = "open", avl: int = 0, owner: int = 0,
+             user=Depends(require_user)):
+    c = db.conn()
+    where, args = "WHERE 1=1 ", []
+    if show == "open":
+        where += "AND cm.status='Planned' "
+    elif show in ("Met", "Missed", "Cancelled"):
+        where += "AND cm.status=? "; args.append(show)
+    if avl:
+        where += "AND cm.avl_id=? "; args.append(avl)
+    if owner:
+        where += "AND cm.owner_person_id=? "; args.append(owner)
+    rows = _commitment_rows(c, where, args)
+    avls = c.execute("SELECT id, name FROM avls WHERE active=1 ORDER BY name").fetchall()
+    products = c.execute("SELECT id, name, category FROM products WHERE active=1 "
+                         "ORDER BY category, name").fetchall()
+    people = c.execute("SELECT id, name FROM people WHERE active=1 ORDER BY name").fetchall()
+    c.close()
+    tot = {"open": sum(1 for r in rows if r["c"]["status"] == "Planned"),
+           "overdue": sum(1 for r in rows if r["state"] == "overdue"),
+           "soon": sum(1 for r in rows if r["state"] == "due-soon"),
+           "notready": sum(1 for r in rows if r["state"] in ("overdue", "due-soon")
+                           and not r["rd"]["ready"])}
+    return templates.TemplateResponse(request, "schedule.html", {"user": user, "rows": rows,
+        "avls": avls, "products": products, "people": people, "show": show, "sel_a": avl,
+        "sel_o": owner, "tot": tot, "kinds": db.COMMITMENT_KINDS,
+        "statuses": db.COMMITMENT_STATUSES, "today": datetime.date.today().isoformat(),
+        "risk_days": db.AT_RISK_DAYS})
+
+@app.post("/schedule/add")
+def commitment_add(request: Request, avl_id: int = Form(...), product_id: int = Form(...),
+                   due_date: str = Form(...), kind: str = Form("Dataroom submission"),
+                   label: str = Form(""), owner_person_id: str = Form(""),
+                   owner_other: str = Form(""), notes: str = Form(""),
+                   next_url: str = Form(""), user=Depends(require_editor)):
+    dest = next_url if next_url.startswith("/") else "/schedule"
+    if not due_date.strip():
+        return RedirectResponse(dest + "?err=date", status_code=303)
+    if kind not in db.COMMITMENT_KINDS:
+        kind = "Other"
+    c = db.conn()
+    oid = _as_id(owner_person_id)
+    oname = ""
+    if oid:
+        row = c.execute("SELECT name FROM people WHERE id=? AND active=1", (oid,)).fetchone()
+        oname, oid = (row["name"], oid) if row else ("", None)
+    c.execute("INSERT INTO commitments(avl_id, product_id, kind, label, due_date, owner, "
+              "owner_person_id, notes, created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+              (avl_id, product_id, kind, label.strip(), due_date,
+               oname or owner_other.strip(), oid, notes.strip(), user["email"], now()))
+    names = c.execute("SELECT a.name AS a, p.name AS p FROM avls a, products p "
+                      "WHERE a.id=? AND p.id=?", (avl_id, product_id)).fetchone()
+    c.commit(); c.close()
+    db.log(user["email"], "commitment:add", f"{kind} by {due_date}",
+           avl_id=avl_id, product_id=product_id, entity="commitment")
+    return RedirectResponse(dest, status_code=303)
+
+@app.post("/schedule/{cid}/save")
+def commitment_save(cid: int, request: Request, due_date: str = Form(...),
+                    kind: str = Form("Other"), label: str = Form(""),
+                    owner_person_id: str = Form(""), owner_other: str = Form(""),
+                    notes: str = Form(""), next_url: str = Form(""),
+                    user=Depends(require_editor)):
+    dest = next_url if next_url.startswith("/") else "/schedule"
+    c = db.conn()
+    row = c.execute("SELECT * FROM commitments WHERE id=?", (cid,)).fetchone()
+    if not row or not due_date.strip():
+        c.close()
+        return RedirectResponse(dest, status_code=303)
+    oid = _as_id(owner_person_id)
+    oname = ""
+    if oid:
+        p = c.execute("SELECT name FROM people WHERE id=? AND active=1", (oid,)).fetchone()
+        oname, oid = (p["name"], oid) if p else ("", None)
+    owner_txt = oname or owner_other.strip() or (row["owner"] if not oid else "")
+    c.execute("UPDATE commitments SET due_date=?, kind=?, label=?, owner=?, owner_person_id=?, "
+              "notes=? WHERE id=?",
+              (due_date, kind if kind in db.COMMITMENT_KINDS else "Other", label.strip(),
+               owner_txt, oid, notes.strip(), cid))
+    c.commit(); c.close()
+    db.log(user["email"], "commitment:save", f"{kind} -> {due_date}",
+           avl_id=row["avl_id"], product_id=row["product_id"], entity="commitment")
+    return RedirectResponse(dest, status_code=303)
+
+@app.post("/schedule/{cid}/status")
+def commitment_status(cid: int, request: Request, status: str = Form(...),
+                      next_url: str = Form(""), user=Depends(require_editor)):
+    dest = next_url if next_url.startswith("/") else "/schedule"
+    if status not in db.COMMITMENT_STATUSES:
+        return RedirectResponse(dest, status_code=303)
+    c = db.conn()
+    row = c.execute("SELECT * FROM commitments WHERE id=?", (cid,)).fetchone()
+    if not row:
+        c.close()
+        return RedirectResponse(dest, status_code=303)
+    met = now()[:10] if status == "Met" else ""
+    c.execute("UPDATE commitments SET status=?, met_at=? WHERE id=?", (status, met, cid))
+    # Meeting a dataroom submission is the event the pursuit records as submitted.
+    if status == "Met" and row["kind"] == "Dataroom submission":
+        c.execute("UPDATE listings SET submitted_at=? WHERE avl_id=? AND product_id=? "
+                  "AND COALESCE(submitted_at,'')=''", (met, row["avl_id"], row["product_id"]))
+    c.commit(); c.close()
+    db.log(user["email"], "commitment:status", f"{row['kind']} ({row['due_date']}) -> {status}",
+           avl_id=row["avl_id"], product_id=row["product_id"], entity="commitment")
+    return RedirectResponse(dest, status_code=303)
+
+@app.post("/schedule/{cid}/delete")
+def commitment_delete(cid: int, request: Request, next_url: str = Form(""),
+                      user=Depends(require_editor)):
+    dest = next_url if next_url.startswith("/") else "/schedule"
+    c = db.conn()
+    row = c.execute("SELECT * FROM commitments WHERE id=?", (cid,)).fetchone()
+    c.execute("DELETE FROM commitments WHERE id=?", (cid,))
+    c.commit(); c.close()
+    if row:
+        db.log(user["email"], "commitment:delete", f"{row['kind']} {row['due_date']}",
+               avl_id=row["avl_id"], product_id=row["product_id"], entity="commitment")
+    return RedirectResponse(dest, status_code=303)
+
+@app.post("/schedule/{cid}/cascade")
+def commitment_cascade(cid: int, request: Request, lead_days: int = Form(7),
+                       overwrite: int = Form(0), next_url: str = Form(""),
+                       user=Depends(require_editor)):
+    """Work backwards: give the outstanding required requirements a due date.
+
+    Defaults to filling only blanks, because someone who has already dated a
+    requirement knows something this calculation does not.
+    """
+    dest = next_url if next_url.startswith("/") else "/schedule"
+    c = db.conn()
+    row = c.execute("SELECT * FROM commitments WHERE id=?", (cid,)).fetchone()
+    if not row:
+        c.close()
+        return RedirectResponse(dest, status_code=303)
+    try:
+        target = (datetime.date.fromisoformat(row["due_date"])
+                  - datetime.timedelta(days=max(0, lead_days))).isoformat()
+    except ValueError:
+        c.close()
+        return RedirectResponse(dest + "?err=date", status_code=303)
+    q = ("UPDATE checklist_items SET due_date=?, updated_by=?, updated_at=? "
+         "WHERE product_id=? AND avl_id=? AND obligation='Required' "
+         "AND status NOT IN ('Complete','Submitted','Accepted') ")
+    if not overwrite:
+        q += "AND COALESCE(due_date,'')='' "
+    c.execute(q, (target, user["email"], now(), row["product_id"], row["avl_id"]))
+    n = c.total_changes
+    c.commit(); c.close()
+    db.log(user["email"], "commitment:cascade",
+           f"{n} requirement(s) dated {target} for the {row['due_date']} commitment",
+           avl_id=row["avl_id"], product_id=row["product_id"], entity="checklist")
+    return RedirectResponse(dest + ("&" if "?" in dest else "?") + f"ok=dated{n}", status_code=303)

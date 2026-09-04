@@ -1,0 +1,88 @@
+{% extends "base.html" %}{% block body %}
+<h2>Schedule</h2>
+<p class="hint">What we have committed to, and by when. A commitment belongs to a product &times; TPO
+&mdash; several can be in flight at once &mdash; and is shown against what is actually outstanding, so a
+date can be read alongside the work behind it rather than on its own.</p>
+{% if request.query_params.get('err') == 'date' %}<p class="err">A commitment needs a date.</p>{% endif %}
+{% if request.query_params.get('ok','').startswith('dated') %}
+<p class="hint" style="color:#1e6b34">Dated {{ request.query_params.get('ok')[5:] }} outstanding requirement(s).</p>{% endif %}
+
+<div class="kpis">
+<div class="kpi"><div class="n">{{ tot.open }}</div>open commitments</div>
+<div class="kpi {{ 'risk' if tot.overdue }}"><div class="n">{{ tot.overdue }}</div>past their date</div>
+<div class="kpi"><div class="n">{{ tot.soon }}</div>due within {{ risk_days }} days</div>
+<div class="kpi {{ 'risk' if tot.notready }}"><div class="n">{{ tot.notready }}</div>due or overdue with work outstanding</div>
+</div>
+
+<form method="get" action="/schedule" class="row" style="margin-bottom:10px">
+<select name="show" onchange="this.form.submit()">
+<option value="open" {% if show=='open' %}selected{% endif %}>Open</option>
+<option value="all" {% if show=='all' %}selected{% endif %}>All</option>
+{% for st in statuses %}{% if st != 'Planned' %}<option value="{{ st }}" {% if show==st %}selected{% endif %}>{{ st }}</option>{% endif %}{% endfor %}</select>
+<select name="avl" onchange="this.form.submit()"><option value="0">All TPOs</option>
+{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel_a %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
+<select name="owner" onchange="this.form.submit()"><option value="0">Any owner</option>
+{% for p in people %}<option value="{{ p.id }}" {% if p.id==sel_o %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+<span class="sub2" style="align-self:center">{{ rows|length }} commitment{{ '' if rows|length==1 else 's' }}</span>
+</form>
+
+<table class="list"><tr><th>Due</th><th></th><th>TPO AVL</th><th>Product</th><th>Commitment</th>
+<th>Dataroom readiness</th><th>Owner</th><th>Status</th><th></th></tr>
+{% for r in rows %}
+{% set c = r.c %}
+<tr class="{{ 'overdue' if r.state=='overdue' }}">
+<td class="nowrap"><b>{{ c.due_date }}</b></td>
+<td class="nowrap">{% if r.days is not none %}
+  {% if r.days < 0 %}<span class="due due-over">{{ -r.days }}d late</span>
+  {% elif r.days == 0 %}<span class="due due-soon">today</span>
+  {% elif r.state == 'due-soon' %}<span class="due due-soon">{{ r.days }}d left</span>
+  {% else %}<span class="due">{{ r.days }}d</span>{% endif %}{% endif %}</td>
+<td><a href="/pursuit/{{ c.avl_id }}/{{ c.product_id }}"><b>{{ c.avl_name }}</b></a></td>
+<td>{{ c.product }}</td>
+<td>{{ c.kind }}{% if c.label %}<div class="sub2">{{ c.label }}</div>{% endif %}
+{% if c.notes %}<div class="sub2">{{ c.notes }}</div>{% endif %}</td>
+<td>{% if r.rd.req %}<b>{{ r.rd.done }}/{{ r.rd.req }}</b> required
+  {% if r.rd.ready %}<span class="chip ready">ready</span>{% endif %}
+  <div class="sub2">{% if r.rd.nofile_req %}{{ r.rd.nofile_req }} without a document{% endif %}
+  {% if r.rd.blocked %}<b class="bad">{{ r.rd.blocked }} blocked</b>{% endif %}
+  {% if r.open_actions %} &middot; {{ r.open_actions }} open action{{ '' if r.open_actions==1 else 's' }}{% endif %}</div>
+{% else %}<span class="hint">no checklist</span>{% endif %}</td>
+<td class="sub2">{{ c.owner_name or c.owner or '-' }}</td>
+<td><span class="cs cs-{{ c.status }}">{{ c.status }}</span>{% if c.met_at %}<div class="sub2">{{ c.met_at }}</div>{% endif %}</td>
+<td class="nowrap">
+{% if c.status == 'Planned' %}
+<form method="post" action="/schedule/{{ c.id }}/status" class="inline">
+<input type="hidden" name="status" value="Met"><input type="hidden" name="next_url" value="/schedule?show={{ show }}">
+<button title="Mark as met">Met</button></form>
+<form method="post" action="/schedule/{{ c.id }}/status" class="inline">
+<input type="hidden" name="status" value="Missed"><input type="hidden" name="next_url" value="/schedule?show={{ show }}">
+<button title="Mark as missed">Missed</button></form>
+{% endif %}
+<form method="post" action="/schedule/{{ c.id }}/delete" class="inline"
+      onsubmit="return confirm('Delete this commitment?')">
+<input type="hidden" name="next_url" value="/schedule?show={{ show }}"><button class="chipx">&times;</button></form>
+{% if c.status == 'Planned' and r.rd.req %}
+<form method="post" action="/schedule/{{ c.id }}/cascade" class="inline"
+      onsubmit="return confirm('Give every outstanding Required requirement a due date 7 days before {{ c.due_date }}? Requirements that already have a date are left alone.')">
+<input type="hidden" name="lead_days" value="7"><input type="hidden" name="next_url" value="/schedule?show={{ show }}">
+<button title="Work backwards: date the outstanding requirements from this commitment">Date work</button></form>
+{% endif %}</td></tr>
+{% else %}<tr><td colspan="9" class="hint">Nothing scheduled. Commit to a date below.</td></tr>{% endfor %}
+</table>
+
+<div class="card"><h3>Commit to a date</h3>
+<form method="post" action="/schedule/add" class="row">
+<select name="avl_id" required>{% for a in avls %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select>
+<select name="product_id" required>{% for p in products %}<option value="{{ p.id }}">{{ p.name }} &mdash; {{ p.category }}</option>{% endfor %}</select>
+<select name="kind">{% for k in kinds %}<option>{{ k }}</option>{% endfor %}</select>
+<input name="due_date" type="date" required title="By when">
+<select name="owner_person_id"><option value="">- owner -</option>
+{% for p in people %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
+<input name="label" placeholder="Label, e.g. 'Interim IE package'" size="24">
+<input name="notes" placeholder="Notes" size="20">
+<button>Commit</button></form>
+<p class="hint"><b>Date work</b> on a commitment sets a due date on every outstanding Required requirement,
+7 days before the commitment, leaving any that already have one alone. That is what turns a date into a plan
+you can work &mdash; those requirements then appear in the <a href="/dataroom/queue">requirement queue</a>
+and go red when late.</p></div>
+{% endblock %}

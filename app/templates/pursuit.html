@@ -43,6 +43,42 @@
 <span class="sub2" style="align-self:center">Listing status itself is set on the
 <a href="/">Dashboard</a> matrix.</span></div></form></div>
 
+<div class="card"><h3>Committed dates</h3>
+{% if commits %}
+<table class="list"><tr><th>Due</th><th></th><th>Commitment</th><th>Owner</th><th>Status</th><th></th></tr>
+{% for r in commits %}{% set cm = r.c %}<tr class="{{ 'overdue' if r.state=='overdue' }}">
+<td class="nowrap"><b>{{ cm.due_date }}</b></td>
+<td class="nowrap">{% if r.days is not none %}{% if r.days < 0 %}<span class="due due-over">{{ -r.days }}d late</span>
+{% elif r.state == 'due-soon' %}<span class="due due-soon">{{ r.days }}d left</span>
+{% else %}<span class="due">{{ r.days }}d</span>{% endif %}{% endif %}</td>
+<td>{{ cm.kind }}{% if cm.label %}<div class="sub2">{{ cm.label }}</div>{% endif %}</td>
+<td class="sub2">{{ cm.owner_name or cm.owner or '-' }}</td>
+<td><span class="cs cs-{{ cm.status }}">{{ cm.status }}</span></td>
+<td class="nowrap">{% if cm.status == 'Planned' %}
+<form method="post" action="/schedule/{{ cm.id }}/status" class="inline">
+<input type="hidden" name="status" value="Met"><input type="hidden" name="next_url" value="/pursuit/{{ a.id }}/{{ p.id }}">
+<button>Met</button></form>
+<form method="post" action="/schedule/{{ cm.id }}/cascade" class="inline"
+      onsubmit="return confirm('Date every outstanding Required requirement 7 days before {{ cm.due_date }}?')">
+<input type="hidden" name="lead_days" value="7"><input type="hidden" name="next_url" value="/pursuit/{{ a.id }}/{{ p.id }}">
+<button>Date work</button></form>{% endif %}
+<form method="post" action="/schedule/{{ cm.id }}/delete" class="inline" onsubmit="return confirm('Delete this commitment?')">
+<input type="hidden" name="next_url" value="/pursuit/{{ a.id }}/{{ p.id }}"><button class="chipx">&times;</button></form>
+</td></tr>{% endfor %}</table>
+{% else %}<p class="hint">Nothing committed for this pursuit yet.</p>{% endif %}
+<form method="post" action="/schedule/add" class="row">
+<input type="hidden" name="avl_id" value="{{ a.id }}"><input type="hidden" name="product_id" value="{{ p.id }}">
+<input type="hidden" name="next_url" value="/pursuit/{{ a.id }}/{{ p.id }}">
+<select name="kind">{% for k in kinds %}<option>{{ k }}</option>{% endfor %}</select>
+<input name="due_date" type="date" required>
+<select name="owner_person_id"><option value="">- owner -</option>
+{% for pe in people %}<option value="{{ pe.id }}">{{ pe.name }}</option>{% endfor %}</select>
+<input name="label" placeholder="Label" size="20">
+<button>Commit to a date</button></form>
+<p class="hint">"Date work" gives every outstanding Required requirement a due date a week before the
+commitment, so the plan shows up in the <a href="/dataroom/queue">requirement queue</a>. Marking a
+dataroom submission met also records it as the submitted date above.</p></div>
+
 <div class="cols3">
 <div class="card"><h3>Outstanding required requirements</h3>
 {% if gaps %}<table class="list"><tr><th>Requirement</th><th>Status</th><th>Owner</th></tr>

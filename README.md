@@ -609,3 +609,27 @@ a 404 page over yesterday's archive, so the script downloads to a temp file and
 only moves it into place after checking the response was 200, that it is a
 readable gzip, and that it actually contains a database. Any failure exits
 non-zero so a scheduler can alert, leaving the previous backup untouched.
+
+## v31 - Schedule: dated commitments
+/schedule is what has been promised and by when. A commitment belongs to a
+product x TPO, and several can be in flight at once - an IE draft, then the
+dataroom, then a revision - which is why it is not a field on the listing and not
+an action. Kinds: dataroom submission, package revision, IE draft to reviewer,
+IE report final, TPO response due, other.
+
+Each is shown against the pursuit's actual readiness: required done, requirements
+without a document, blocked ones, open actions. A date on its own says nothing;
+a date beside "3/59 required, 12 blocked" says a great deal. Days remaining are
+shown, overdue in red, and anything inside 14 days is called out - but nothing is
+scored or predicted, because the app cannot know what a day of someone's effort
+buys.
+
+"Date work" is the part that turns a date into a plan: it gives every outstanding
+Required requirement a due date a week before the commitment, leaving alone any
+that already has one, on the grounds that whoever set it knew something this
+calculation does not. Those requirements then appear in /dataroom/queue and go red
+when late.
+
+Marking a dataroom submission Met records it as the pursuit's submitted date, so
+the two cannot drift apart. Commitments appear on the pursuit record and as a
+next-commitment column on the acceptance portfolio.

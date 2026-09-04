@@ -22,7 +22,7 @@ the dataroom is, what was last sent, and what is outstanding. Click a row for th
 </form>
 
 <table class="list"><tr><th>TPO AVL</th><th>Product</th><th>Status</th><th>Dataroom</th><th></th>
-<th>Last package</th><th>Actions</th><th>IE</th><th>Owner</th><th>Target</th><th>Next milestone</th></tr>
+<th>Last package</th><th>Actions</th><th>IE</th><th>Owner</th><th>Next commitment</th><th>Target</th><th>Next milestone</th></tr>
 {% for r in rows %}<tr class="{{ 'overdue' if r.overdue_target }}">
 <td><a href="/pursuit/{{ r.l.avl_id }}/{{ r.l.product_id }}"><b>{{ r.l.avl_name }}</b></a></td>
 <td class="prodcell">{{ r.l.product }}<div class="sub2">{{ r.l.category }}</div></td>
@@ -39,9 +39,14 @@ the dataroom is, what was last sent, and what is outstanding. Click a row for th
 <td class="sub2">{% if r.open_actions %}{{ r.open_actions }} open{% if r.overdue_actions %} <b class="bad">{{ r.overdue_actions }} late</b>{% endif %}{% else %}-{% endif %}</td>
 <td class="sub2">{% if r.ie %}{{ r.ie.done }}/{{ r.ie.n }} <div>{{ r.ie.status }}</div>{% else %}-{% endif %}</td>
 <td class="sub2">{{ r.l.owner or '-' }}</td>
+<td class="sub2 nowrap">{% if r.next_commit %}<b>{{ r.next_commit.due_date }}</b>
+<div>{{ r.next_commit.kind }}</div>
+{% if r.next_state.days is not none and r.next_state.days < 0 %}<span class="due due-over">{{ -r.next_state.days }}d late</span>
+{% elif r.next_state.state == 'due-soon' %}<span class="due due-soon">{{ r.next_state.days }}d left</span>{% endif %}
+{% else %}-{% endif %}</td>
 <td class="sub2 nowrap">{{ r.l.target_date or '-' }}</td>
 <td class="sub2">{{ r.l.next_milestone }}</td>
-</tr>{% else %}<tr><td colspan="11" class="hint">Nothing matches that view.</td></tr>{% endfor %}</table>
+</tr>{% else %}<tr><td colspan="12" class="hint">Nothing matches that view.</td></tr>{% endfor %}</table>
 <p class="hint">"Ready" means every Required requirement is Complete, Submitted or Accepted. Red rows are past
 their target listing date and not yet listed.</p>
 {% endblock %}

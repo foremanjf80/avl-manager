@@ -444,6 +444,17 @@ CREATE INDEX IF NOT EXISTS ix_wti_template ON workstream_template_items(template
 CREATE INDEX IF NOT EXISTS ix_checklist_pa ON checklist_items(product_id, avl_id);
 CREATE INDEX IF NOT EXISTS ix_attach_kind ON attachments(kind, ref_id);
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS commitments(
+  id INTEGER PRIMARY KEY,
+  avl_id INTEGER NOT NULL REFERENCES avls(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  kind TEXT DEFAULT 'Dataroom submission', label TEXT DEFAULT '',
+  due_date TEXT NOT NULL, owner TEXT DEFAULT '',
+  owner_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+  status TEXT DEFAULT 'Planned', met_at TEXT DEFAULT '', notes TEXT DEFAULT '',
+  created_by TEXT, created_at TEXT);
+CREATE INDEX IF NOT EXISTS ix_commit_due ON commitments(status, due_date);
+CREATE INDEX IF NOT EXISTS ix_commit_pa ON commitments(avl_id, product_id);
 CREATE TABLE IF NOT EXISTS contacts(
   id INTEGER PRIMARY KEY,
   avl_id INTEGER NOT NULL REFERENCES avls(id) ON DELETE CASCADE,
@@ -1061,3 +1072,31 @@ def auto_backup():
         return None            # a backup failing must never block a login
     prune_snapshots()
     return path
+
+
+# ---------------- dated commitments (v31) ----------------
+# "We will submit the Gen4 dataroom to EnFin by 30 Nov" is not a task and not a
+# listing status: it is a promise the pursuit carries, and several can be in
+# flight at once (an IE draft, then the dataroom, then a revision). Actions hang
+# off it rather than being it.
+COMMITMENT_KINDS = ["Dataroom submission", "Package revision", "IE draft to reviewer",
+                    "IE report final", "TPO response due", "Other"]
+COMMITMENT_STATUSES = ["Planned", "Met", "Missed", "Cancelled"]
+AT_RISK_DAYS = 14        # inside this window, outstanding required work is called out
+
+def commitment_state(row, today=None):
+    """Facts about where a commitment stands. No invented score - just the shape
+    of it: days remaining, and whether it has already slipped."""
+    today = today or datetime.date.today().isoformat()
+    st = row["status"]
+    if st != "Planned":
+        return {"state": st.lower(), "days": None}
+    try:
+        d = (datetime.date.fromisoformat(row["due_date"]) - datetime.date.fromisoformat(today)).days
+    except (ValueError, TypeError):
+        return {"state": "planned", "days": None}
+    if d < 0:
+        return {"state": "overdue", "days": d}
+    if d <= AT_RISK_DAYS:
+        return {"state": "due-soon", "days": d}
+    return {"state": "planned", "days": d}
