@@ -652,5 +652,29 @@ Fixed alongside: `/download` raised a 500 when the row outlived the file (a
 restore onto a fresh disk, a manual tidy of the uploads directory). It now
 returns to the Files page saying so.
 
-Not covered: .docx and .xlsx, which browsers cannot render. mammoth.js /
-SheetJS client-side would do it for free if that turns out to matter.
+Word and Excel followed in v33, below.
+
+## v33 - Word and Excel preview, rendered in a sandbox
+View now lights up for .docx, .xlsx and .xlsm as well. Browsers cannot render
+either format, so a vendored library does it: docx-preview (with JSZip) for
+Word, SheetJS for Excel, both served from /static/vendor rather than a CDN, so
+there is no runtime third-party dependency and no outside request revealing
+which document someone opened.
+
+The libraries turn an outside party's file into HTML, which is the same class of
+risk the inline allowlist exists to avoid - so that HTML is never built in this
+origin. The conversion runs inside an iframe with sandbox="allow-scripts" and no
+allow-same-origin, which gives it an opaque origin: the library works, and
+nothing it produces can read the page, the session or the cookie. That frame
+cannot fetch either, so the parent - which does hold the session - reads the
+bytes from /download and posts them in. Office files are still never served
+inline; /preview keeps redirecting them to /download.
+
+Nothing loads on page view. The ~1.1 MB of library is pulled only inside the
+frame, only when someone opens a Word or Excel file.
+
+Multi-sheet workbooks get sheet tabs. The dialog says "converted for preview -
+formatting may differ", because it does: charts, conditional formatting and
+exact page layout do not survive. It answers "is this the right document",
+not "is this formatted correctly". Anything that fails to parse says so and
+points at Download.

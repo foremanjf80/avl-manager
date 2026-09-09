@@ -94,7 +94,7 @@ Download evidence pack button on the report.</p>
 {% for a in atts %}<tr>
 <td><a href="/files/{{ a.id }}/download">{{ a.filename }}</a>{% if pv[a.id] %}
   <button type="button" class="btn small ghost pv-open" data-id="{{ a.id }}"
-    data-name="{{ a.filename }}" data-kind="{{ 'pdf' if pv[a.id] == 'application/pdf' else 'img' }}"
+    data-name="{{ a.filename }}" data-kind="{{ pv[a.id] }}"
     >View</button>{% endif %}</td>
 <td>{{ names[a.kind].get(a.ref_id, '#' ~ a.ref_id) if a.kind in names else a.kind ~ '#' ~ a.ref_id }}</td>
 <td><form method="post" action="/files/{{ a.id }}/reassign" class="inline">
@@ -205,6 +205,7 @@ document.querySelectorAll('form.iepick').forEach(f => {
 <dialog id="pv" class="pv">
   <div class="pv-head">
     <b id="pv-name"></b>
+    <span class="pv-note" id="pv-note" hidden>converted for preview &mdash; formatting may differ</span>
     <span class="row">
       <a class="btn small ghost" id="pv-tab" target="_blank" rel="noopener">New tab</a>
       <a class="btn small ghost" id="pv-dl">Download</a>
@@ -216,17 +217,113 @@ document.querySelectorAll('form.iepick').forEach(f => {
 <script>
 (function () {
   const dlg = document.getElementById('pv'), body = document.getElementById('pv-body');
+  const note = document.getElementById('pv-note'), tab = document.getElementById('pv-tab');
+
+  // Word and Excel are rendered by a vendored library running INSIDE the frame.
+  // sandbox="allow-scripts" without allow-same-origin gives that frame an opaque
+  // origin: the library can do its job, and nothing it produces from an outside
+  // party's file can read this page, this session or the cookie. The frame cannot
+  // fetch either, which is why the parent reads the bytes and posts them in.
+  const LIB = {docx: ['jszip.min.js', 'docx-preview.min.js'], xlsx: ['xlsx.full.min.js']};
+
+  function shell(kind) {
+    const tags = LIB[kind].map(f =>
+      '<scr' + 'ipt src="' + location.origin + '/static/vendor/' + f + '"></scr' + 'ipt>').join('');
+    return '<!doctype html><meta charset="utf-8"><style>' + FRAME_CSS + '</style>' +
+      '<div id="tabs"></div><div id="out"></div>' + tags + '<scr' + 'ipt>' + FRAME_JS + '</scr' + 'ipt>';
+  }
+
+  const FRAME_CSS = `
+    body{margin:0;background:#3a3a3a;color:#222;font:14px Calibri,system-ui,sans-serif}
+    .docx-wrapper{background:#3a3a3a!important;padding:16px 0!important}
+    #tabs{position:sticky;top:0;background:#22303f;padding:6px 8px;display:flex;gap:6px;
+      flex-wrap:wrap;z-index:2}
+    #tabs:empty{display:none}
+    #tabs button{background:#3f5570;color:#fff;border:0;border-radius:4px;padding:5px 10px;
+      font:inherit;font-size:13px;cursor:pointer}
+    #tabs button[aria-current="true"]{background:#fff;color:#1F3864;font-weight:bold}
+    table{border-collapse:collapse;background:#fff;margin:14px}
+    td,th{border:1px solid #bbb;padding:4px 8px;font-size:13px;white-space:nowrap;
+      max-width:420px;overflow:hidden;text-overflow:ellipsis}
+    tr:first-child td{background:#eef2f7;font-weight:bold}
+    .msg{color:#fff;padding:24px;font-size:15px}`;
+
+  const FRAME_JS = `
+    const out = document.getElementById('out'), tabs = document.getElementById('tabs');
+    function fail(m) { out.innerHTML = '<p class="msg">' + m + '</p>';
+                       parent.postMessage({done: 1}, '*'); }
+    window.addEventListener('message', async ev => {
+      const d = ev.data || {};
+      if (!d.buf) return;
+      try {
+        if (d.kind === 'docx') {
+          await docx.renderAsync(d.buf, out, null,
+            {className: 'docx', inWrapper: true, breakPages: true, ignoreLastRenderedPageBreak: false});
+        } else {
+          const wb = XLSX.read(new Uint8Array(d.buf), {type: 'array'});
+          if (!wb.SheetNames.length) return fail('That workbook has no sheets.');
+          const showSheet = n => {
+            out.innerHTML = XLSX.utils.sheet_to_html(wb.Sheets[n], {editable: false});
+            [...tabs.children].forEach(b => b.setAttribute('aria-current', String(b.textContent === n)));
+          };
+          if (wb.SheetNames.length > 1) {
+            wb.SheetNames.forEach(n => {
+              const b = document.createElement('button');
+              b.textContent = n; b.onclick = () => showSheet(n); tabs.appendChild(b);
+            });
+          }
+          showSheet(wb.SheetNames[0]);
+        }
+        parent.postMessage({done: 1}, '*');
+      } catch (e) {
+        fail('This file could not be read for preview. Download it to open in Office.');
+      }
+    });
+    parent.postMessage({ready: 1}, '*');`;
+
   function show(id, name, kind) {
     document.getElementById('pv-name').textContent = name;
-    document.getElementById('pv-tab').href = '/files/' + id + '/preview';
     document.getElementById('pv-dl').href = '/files/' + id + '/download';
-    const el = document.createElement(kind === 'pdf' ? 'iframe' : 'img');
-    el.src = '/files/' + id + '/preview';
-    if (kind !== 'pdf') el.alt = name;
-    body.replaceChildren(el);
+    const converted = kind === 'docx' || kind === 'xlsx';
+    note.hidden = !converted;
+    // A converted file has no inline URL to open, so the new-tab link would just
+    // download it a second time. Hide it rather than mislabel it.
+    tab.hidden = converted;
+    tab.href = '/files/' + id + '/preview';
     dlg.showModal();
+
+    if (!converted) {
+      const el = document.createElement(kind === 'pdf' ? 'iframe' : 'img');
+      el.src = '/files/' + id + '/preview';
+      if (kind !== 'pdf') el.alt = name;
+      return body.replaceChildren(el);
+    }
+
+    const frame = document.createElement('iframe');
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.srcdoc = shell(kind);
+    const status = document.createElement('p');
+    status.className = 'pv-status'; status.textContent = 'Reading ' + name + '…';
+    body.replaceChildren(status, frame);
+
+    let bytes = null, ready = false;
+    const send = () => {
+      if (!ready || !bytes) return;
+      frame.contentWindow.postMessage({kind: kind, buf: bytes}, '*');
+    };
+    const onMsg = ev => {
+      if (ev.source !== frame.contentWindow) return;
+      if (ev.data && ev.data.ready) { ready = true; send(); }
+      if (ev.data && ev.data.done) { status.remove(); window.removeEventListener('message', onMsg); }
+    };
+    window.addEventListener('message', onMsg);
+    fetch('/files/' + id + '/download', {credentials: 'same-origin'})
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+      .then(b => { bytes = b; send(); })
+      .catch(() => { status.textContent = 'Could not load that file.'; });
   }
-  // Emptied on close so a large PDF is not left rendering behind the page.
+
+  // Emptied on close so a large document is not left rendering behind the page.
   // Catches Esc too, which closes the dialog without going through Close.
   dlg.addEventListener('close', () => body.replaceChildren());
   document.getElementById('pv-close').onclick = () => dlg.close();

@@ -1767,6 +1767,21 @@ def preview_type(filename):
     """The media type to render this file as, or None if it must be downloaded."""
     return PREVIEW_TYPES.get(os.path.splitext(filename or "")[1].lower())
 
+# Formats a vendored library can render, but the browser cannot. These are never
+# served inline: the viewer fetches the bytes from /download and converts them
+# inside a sandboxed iframe, so the HTML derived from an outside party's file has
+# an opaque origin and can reach neither this origin nor the session cookie.
+CONVERT_TYPES = {".docx": "docx", ".xlsx": "xlsx", ".xlsm": "xlsx"}
+
+def preview_kind(filename):
+    """What the viewer should do with this file, or None to leave it a download."""
+    media = preview_type(filename)
+    if media == "application/pdf":
+        return "pdf"
+    if media:
+        return "img"
+    return CONVERT_TYPES.get(os.path.splitext(filename or "")[1].lower())
+
 def _files_context(c):
     products = c.execute("SELECT id, name FROM products ORDER BY name").fetchall()
     avls = c.execute("SELECT id, name FROM avls ORDER BY name").fetchall()
@@ -1808,7 +1823,7 @@ def files(request: Request, kind: str = "", ref: int = 0, user=Depends(require_u
     atts = c.execute(q + " ORDER BY id DESC", params).fetchall()
     # Which rows the browser can show in place, so the table offers View only
     # where it will actually work.
-    pv = {a["id"]: preview_type(a["filename"]) for a in atts}
+    pv = {a["id"]: preview_kind(a["filename"]) for a in atts}
     # How many files sit under each bundle target, so the download side can say
     # up front whether there is anything to fetch.
     counts = {"product": {}, "avl": {}, "call": {}, "checklist": {}}
