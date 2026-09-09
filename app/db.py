@@ -273,6 +273,12 @@ def _migrate(c):
     if irs and "narrative" not in irs:
         c.execute("ALTER TABLE ie_report_sections ADD COLUMN narrative TEXT DEFAULT ''")
         c.commit()
+    # The workbook a template was imported from, kept so the filled copy sent
+    # back to the reviewer is their own file with their own formatting.
+    it_ = [r[1] for r in c.execute("PRAGMA table_info(ie_templates)")]
+    if it_ and "source_path" not in it_:
+        c.execute("ALTER TABLE ie_templates ADD COLUMN source_path TEXT DEFAULT ''")
+        c.commit()
 
 def _seed_team(c):
     if c.execute("SELECT COUNT(*) FROM assignments").fetchone()[0]:
@@ -890,6 +896,14 @@ CREATE INDEX IF NOT EXISTS ix_ie_trev ON ie_template_revisions(template_id, id D
 IE_REVIEWERS = ["DNV", "Black & Veatch", "Leidos", "PVEL", "RETC", "Other"]
 IE_PRIORITIES = ["Critical", "High", "Normal", "Low"]
 IE_ITEM_STATUSES = ["Not Started", "In Progress", "Submitted", "Accepted", "Blocked", "N/A"]
+
+# DNV's data request validates its Status column against exactly three values, so
+# the six we track have to land on one of them or their sheet shows an invalid
+# entry. Blocked maps to OPEN rather than IN REVIEW on purpose: nothing has
+# reached the reviewer, and saying otherwise overstates progress.
+IE_TO_DNV_STATUS = {"Not Started": "OPEN", "Blocked": "OPEN",
+                    "In Progress": "IN REVIEW", "Submitted": "IN REVIEW",
+                    "Accepted": "CLOSED", "N/A": "CLOSED"}
 IE_REPORT_STATUSES = ["Planning", "Data Request", "In Review", "Draft Issued", "Final", "On Hold"]
 IE_SEED_TAG = "seed:dnv-g4ess-2026-08"
 

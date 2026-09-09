@@ -6,6 +6,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db
+from . import ie_xlsx
 from .auth import (AUTH_MODE, domain_ok, current_user, require_user, require_editor,
                    require_admin, get_role, ALLOWED_DOMAIN)
 from . import auth as _auth
@@ -2225,6 +2226,9 @@ def contacts_csv(request: Request, user=Depends(require_user)):
 import zipfile, json
 
 PKG_DIR = os.path.join(UPLOAD_DIR, "packages")
+# The reviewer workbooks a template was imported from. Kept out of packages so a
+# dataroom zip never sweeps them up as if they were evidence.
+IE_SRC_DIR = os.path.join(UPLOAD_DIR, "ie_sources")
 os.makedirs(PKG_DIR, exist_ok=True)
 
 def _safe(name, limit=80):
@@ -2840,6 +2844,59 @@ def ie_tmpl_add(request: Request, name: str = Form(...), reviewer: str = Form("D
     db.log(user["email"], "ie:template:add", nm)
     return RedirectResponse(f"/ie/templates?t={tid}", status_code=303)
 
+@app.post("/ie/templates/import")
+async def ie_tmpl_import(request: Request, f: UploadFile = File(...), name: str = Form(""),
+                         reviewer: str = Form("DNV"), sheet: str = Form(""),
+                         header_row: int = Form(3), id_col: str = Form("A"),
+                         desc_col: str = Form("B"), evidence_col: str = Form("C"),
+                         user=Depends(require_editor)):
+    """Turn a reviewer's data-request workbook into a template.
+
+    The file is kept, not just read: the filled copy we send back later has to be
+    their own workbook with their own formatting, not a rebuild of it.
+    """
+    safe = _re.sub(r"[^A-Za-z0-9._-]", "_", f.filename or "data_request.xlsx")
+    if not safe.lower().endswith((".xlsx", ".xlsm")):
+        return RedirectResponse("/ie/templates?err=notxlsx", status_code=303)
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    stored = os.path.join(IE_SRC_DIR, f"{stamp}_{safe}")
+    os.makedirs(IE_SRC_DIR, exist_ok=True)
+    with open(stored, "wb") as out:
+        while chunk := await f.read(1024 * 1024):
+            out.write(chunk)
+    try:
+        parsed = ie_xlsx.parse(stored, sheet=sheet.strip(), header_row=max(1, header_row),
+                               id_col=id_col.strip() or "A", desc_col=desc_col.strip() or "B",
+                               evidence_col=evidence_col.strip() or "C")
+    except Exception:
+        os.remove(stored)
+        return RedirectResponse("/ie/templates?err=unreadable", status_code=303)
+    if not parsed["n_items"]:
+        os.remove(stored)
+        return RedirectResponse("/ie/templates?err=noitems", status_code=303)
+
+    nm = (name.strip() or parsed["name"])[:160]
+    c = db.conn()
+    if c.execute("SELECT 1 FROM ie_templates WHERE name=?", (nm,)).fetchone():
+        nm = f"{nm} ({stamp[:8]})"
+    c.execute("INSERT INTO ie_templates(name, reviewer, notes, source_path, created_by, created_at) "
+              "VALUES(?,?,?,?,?,?)",
+              (nm, reviewer.strip() or "DNV",
+               f"Imported from {safe}, sheet '{parsed['sheet']}'.", stored, user["email"], now()))
+    tid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+    for si, sec in enumerate(parsed["sections"], 1):
+        c.execute("INSERT INTO ie_template_sections(template_id, code, title, sort_order) "
+                  "VALUES(?,?,?,?)", (tid, sec["code"], sec["title"][:300], si * 10))
+        sid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        for ii, it in enumerate(sec["items"], 1):
+            c.execute("INSERT INTO ie_template_items(section_id, item_id, review_item, "
+                      "evidence, sort_order) VALUES(?,?,?,?,?)",
+                      (sid, it["item_id"], it["review_item"][:1000], it["evidence"][:1000], ii * 10))
+    c.commit(); c.close()
+    db.log(user["email"], "ie:template:import",
+           f"{nm} - {len(parsed['sections'])} sections, {parsed['n_items']} items from {safe}")
+    return RedirectResponse(f"/ie/templates?t={tid}&imported={parsed['n_items']}", status_code=303)
+
 @app.post("/ie/templates/{tid}/edit")
 def ie_tmpl_edit(tid: int, request: Request, name: str = Form(...), reviewer: str = Form("DNV"),
                  category: str = Form(""), notes: str = Form(""), source_url: str = Form(""),
@@ -2979,6 +3036,61 @@ def ie_tmpl_undo(rev_id: int, request: Request, user=Depends(require_editor)):
     db.log(user["email"], "ie:template:undo", f"t{tid}: reverted '{action}'")
     return RedirectResponse(f"/ie/templates?t={tid}&undone={action}", status_code=303)
 
+def _ie_dnv_fill(c, rid):
+    """What is needed to hand the reviewer their own workbook back, filled in.
+
+    Returns (source workbook, {Issue ID: (their status word, our filenames)}),
+    or (None, {}) when the template was not imported from a workbook - the
+    hand-built baselines have no file of the reviewer's to fill.
+    """
+    r = c.execute("SELECT template_id FROM ie_reports WHERE id=?", (rid,)).fetchone()
+    src = ""
+    if r and r["template_id"]:
+        t = c.execute("SELECT source_path FROM ie_templates WHERE id=?",
+                      (r["template_id"],)).fetchone()
+        src = (t["source_path"] if t else "") or ""
+    if not src or not os.path.exists(src):
+        return None, {}
+    items = c.execute("SELECT * FROM ie_report_items WHERE report_id=?", (rid,)).fetchall()
+    files = {}
+    if items:
+        qs = ",".join("?" * len(items))
+        for a in c.execute(f"SELECT ref_id, filename FROM attachments WHERE kind='ie_item' "
+                           f"AND ref_id IN ({qs}) ORDER BY id", [i["id"] for i in items]):
+            files.setdefault(a["ref_id"], []).append(a["filename"])
+    vals = {}
+    for it in items:
+        if it["item_id"]:
+            vals[str(it["item_id"]).strip()] = (
+                db.IE_TO_DNV_STATUS.get(it["status"], "OPEN"),
+                ", ".join(files.get(it["id"], [])))
+    return src, vals
+
+@app.get("/ie/report/{rid}/datarequest.xlsx")
+def ie_datarequest(rid: int, request: Request, user=Depends(require_user)):
+    """The reviewer's own workbook, with our columns filled from this review."""
+    c = db.conn()
+    r = c.execute("SELECT r.*, p.name AS product FROM ie_reports r JOIN products p ON p.id=r.product_id "
+                  "WHERE r.id=?", (rid,)).fetchone()
+    if not r:
+        c.close()
+        return RedirectResponse("/ie", status_code=303)
+    src, vals = _ie_dnv_fill(c, rid)
+    c.close()
+    if not src:
+        return RedirectResponse(f"/ie/report/{rid}?err=nosource", status_code=303)
+    stamp = datetime.datetime.now().strftime("%Y%m%d")
+    out = os.path.join(PKG_DIR, f"{_safe(r['product'], 40)}_DataRequest_{stamp}.xlsx")
+    os.makedirs(PKG_DIR, exist_ok=True)
+    try:
+        n = ie_xlsx.fill(src, out, vals)
+    except Exception:
+        return RedirectResponse(f"/ie/report/{rid}?err=fillfailed", status_code=303)
+    db.log(user["email"], "ie:datarequest",
+           f"{r['product']} - {n['status_written']} statuses, {n['evidence_written']} evidence cells")
+    return FileResponse(out, filename=os.path.basename(out),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
 @app.get("/ie/report/{rid}/bundle.zip")
 def ie_bundle(rid: int, request: Request, user=Depends(require_user)):
     """The IE evidence pack: files foldered by section, with manifest and summary."""
@@ -2993,10 +3105,28 @@ def ie_bundle(rid: int, request: Request, user=Depends(require_user)):
     stamp = datetime.datetime.now().strftime("%Y%m%d")
     base = f"{_safe(r['reviewer'], 20)}_{_safe(r['product'], 40)}_IE_{stamp}"
     path = os.path.join(PKG_DIR, base + ".zip")
+    c2 = db.conn()
+    src, vals = _ie_dnv_fill(c2, rid)
+    c2.close()
     man, summ = [], []
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        # Their data request, filled in, sits at the root beside the folders it
+        # describes - so the zip is the whole submission, not just the files.
+        if src:
+            filled = os.path.join(PKG_DIR, f"_filled_{rid}.xlsx")
+            try:
+                ie_xlsx.fill(src, filled, vals)
+                z.write(filled, f"{_safe(os.path.basename(src), 90)}")
+                man.append(["(root)", "", "reviewer data request, filled",
+                            _safe(os.path.basename(src), 90)])
+                os.remove(filled)
+            except Exception:
+                man.append(["(root)", "", "reviewer data request",
+                            "COULD NOT BE GENERATED"])
         for gi, g in enumerate(groups, 1):
-            folder = f"{gi:02d}_{_safe(g['sec']['title'], 50)}"
+            # Foldered by the reviewer's own Issue IDs, so the zip opens as the
+            # structure they asked for rather than one of our invention.
+            folder = _safe(f"{g['sec']['code'] or gi:02} {g['sec']['title'][:44]}", 52)
             # Section-scoped evidence sits at the top of its section folder,
             # above the per-item subfolders.
             for f in sec_atts.get(g["sec"]["id"], []):
@@ -3020,7 +3150,11 @@ def ie_bundle(rid: int, request: Request, user=Depends(require_user)):
                              it["owner"], it["due_date"], len(files),
                              "INCLUDED" if files else "NO EVIDENCE", it["gap"]])
                 for f in files:
-                    arc = f"{folder}/{_safe(it['item_id'] or it['sub_section'], 40)}/{_safe(f['filename'], 90)}"
+                    # Trimmed hard: Windows still stops at a 260-character path,
+                    # and these get unzipped into somebody's Downloads folder.
+                    sub = _safe(f"{it['item_id']} {it['review_item'][:44]}".strip()
+                                if it["item_id"] else it["sub_section"], 52)
+                    arc = f"{folder}/{sub}/{_safe(f['filename'], 90)}"
                     if os.path.exists(f["stored_path"]):
                         z.write(f["stored_path"], arc)
                         man.append([g["sec"]["title"], it["item_id"], it["review_item"], arc])

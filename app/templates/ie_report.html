@@ -1,7 +1,13 @@
 {% extends "base.html" %}{% block body %}
 <div class="row" style="justify-content:space-between">
 <h2>{{ r.name }}</h2>
-<a class="btn small" href="/ie/report/{{ r.id }}/bundle.zip">Download evidence pack</a></div>
+<a class="btn small" href="/ie/report/{{ r.id }}/bundle.zip">Download evidence pack</a>
+<a class="btn small ghost" href="/ie/report/{{ r.id }}/datarequest.xlsx">Data request (xlsx)</a></div>
+{% if request.query_params.get('err') == 'nosource' %}<p class="hint" style="color:#b00">This review's
+template was not imported from a workbook, so there is no reviewer file to fill. Import the data
+request on <a href="/ie/templates">IE templates</a> and start a review from it.</p>{% endif %}
+{% if request.query_params.get('err') == 'fillfailed' %}<p class="hint" style="color:#b00">The workbook
+could not be written. It may have been moved off the disk.</p>{% endif %}
 <p class="hint"><a href="/ie">All IE reviews</a> &middot; {{ r.product }} ({{ r.category }})</p>
 {% if request.query_params.get('err') == 'files' %}
 <p class="hint" style="color:#b00">That item still has evidence attached. Re-file it on <a href="/files">Files</a> first.</p>{% endif %}

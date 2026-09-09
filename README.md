@@ -678,3 +678,31 @@ formatting may differ", because it does: charts, conditional formatting and
 exact page layout do not survive. It answers "is this the right document",
 not "is this formatted correctly". Anything that fails to parse says so and
 points at Download.
+
+## v34 - Import a reviewer's workbook, and hand it back filled
+DNV issues a data-request spreadsheet and expects it back. Rebuilding that
+checklist by hand here was the same work twice, so the workbook is imported once
+to become an IE template, and after that it is an output rather than a second
+system to maintain.
+
+**Import** (`/ie/templates`): upload the data request as sent. Issue IDs that are
+whole thousands (1000, 2000 ... 10000) are sections; everything else is a
+requirement under the one above it. Preamble rows carrying text but no ID are
+skipped. Sheet name, header row and column letters are all overridable, so a
+differently shaped tracker still imports. The file itself is kept under
+data_uploads/ie_sources.
+
+**Give it back** (`/ie/report/{id}/datarequest.xlsx`): their own workbook, their
+own formatting, with our status in column E and the filenames we hold in column
+C. Three rules keep it honest. The original is never written - a fresh copy each
+time. Status is only ever a value their own dropdown validates, so the six
+statuses we track collapse onto OPEN / IN REVIEW / CLOSED, with Blocked mapping
+to OPEN because nothing has reached the reviewer and saying otherwise overstates
+progress. And a note somebody typed into their sheet is left alone unless we
+actually hold files for that item.
+
+**The evidence pack** (`/ie/report/{id}/bundle.zip`) now folders by their
+numbering - `2000 EQUIPMENT REVIEW - BATTERY/2003 Single line diagram.../file.pdf`
+- with the filled data request at the root, so the zip is the whole submission.
+Paths are trimmed hard because Windows still stops at 260 characters and these
+get unzipped into somebody's Downloads folder.

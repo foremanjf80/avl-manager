@@ -6,6 +6,10 @@
 reviews already under way.</p>
 {% if request.query_params.get('err') == 'dup' %}<p class="hint" style="color:#b00">A template with that name already exists.</p>{% endif %}
 {% if request.query_params.get('err') == 'gone' %}<p class="hint" style="color:#b00">That restore point no longer exists.</p>{% endif %}
+{% if request.query_params.get('err') == 'notxlsx' %}<p class="hint" style="color:#b00">That needs to be an .xlsx or .xlsm workbook.</p>{% endif %}
+{% if request.query_params.get('err') == 'unreadable' %}<p class="hint" style="color:#b00">That workbook could not be read. Check the sheet name and column letters.</p>{% endif %}
+{% if request.query_params.get('err') == 'noitems' %}<p class="hint" style="color:#b00">No requirements were found. Check which row holds the headers and which column holds the ID.</p>{% endif %}
+{% if request.query_params.get('imported') %}<p class="hint" style="color:#2e7d32">Imported {{ request.query_params.get('imported') }} requirements. The workbook is kept, so a filled copy can be generated from any review that uses this template.</p>{% endif %}
 {% if request.query_params.get('undone') %}<p class="hint" style="color:#2e7d32">Rolled back "{{ request.query_params.get('undone') }}".</p>{% endif %}
 
 <div class="card"><h3>Library</h3>
@@ -23,7 +27,25 @@ reviews already under way.</p>
 <select name="copy_from"><option value="">Start empty</option>{% for t in tmpls %}<option value="{{ t.id }}">Copy from: {{ t.name }}</option>{% endfor %}</select>
 <input name="notes" placeholder="Notes" size="18">
 <input name="source_url" placeholder="Source workbook URL" size="18">
-<button>Create</button></form></div>
+<button>Create</button></form>
+
+<h3>Import a reviewer's workbook</h3>
+<p class="hint">Upload the data request as sent &mdash; DNV's Issue IDs become the sections and
+requirements. The file is kept, so a review built on this template can hand back
+<b>their own workbook</b>, filled in, rather than a rebuild of it. Sections are the IDs that are
+whole thousands (1000, 2000); everything else is a requirement under the one above it.</p>
+<form method="post" action="/ie/templates/import" enctype="multipart/form-data" class="row">
+<input type="file" name="f" accept=".xlsx,.xlsm" required>
+<input name="name" placeholder="Name (defaults to the sheet title)" size="26">
+<select name="reviewer">{% for rv in reviewers %}<option>{{ rv }}</option>{% endfor %}</select>
+<button>Import</button>
+<span class="sub2" style="align-self:center">Columns:</span>
+<input name="sheet" placeholder="Sheet" size="9" title="Blank uses the first sheet">
+<input name="header_row" value="3" size="2" title="Row holding the column headers">
+<input name="id_col" value="A" size="2" title="Issue ID column">
+<input name="desc_col" value="B" size="2" title="Description column">
+<input name="evidence_col" value="C" size="2" title="Our notes column">
+</form></div>
 
 {% if cur %}
 <div class="card"><h3>{{ cur.name }}</h3>
