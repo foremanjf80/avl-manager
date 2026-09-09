@@ -5,7 +5,10 @@
 {% if request.query_params.get('err') == 'empty' %}
 <p class="hint" style="color:#b00">Nothing is filed under that target yet, so there was nothing to download.</p>
 {% elif request.query_params.get('err') == 'badtarget' %}
-<p class="hint" style="color:#b00">That download target no longer exists.</p>{% endif %}
+<p class="hint" style="color:#b00">That download target no longer exists.</p>
+{% elif request.query_params.get('err') == 'gone' %}
+<p class="hint" style="color:#b00">That file is listed here but is no longer on disk. Re-upload it,
+  or remove the row with &times;.</p>{% endif %}
 
 <div class="cols">
 <div class="card"><h3>Upload</h3>
@@ -89,7 +92,10 @@ Download evidence pack button on the report.</p>
 
 <table class="list"><tr><th>File</th><th>Applies to</th><th>Re-file</th><th>By</th><th>When</th><th></th></tr>
 {% for a in atts %}<tr>
-<td><a href="/files/{{ a.id }}/download">{{ a.filename }}</a></td>
+<td><a href="/files/{{ a.id }}/download">{{ a.filename }}</a>{% if pv[a.id] %}
+  <button type="button" class="btn small ghost pv-open" data-id="{{ a.id }}"
+    data-name="{{ a.filename }}" data-kind="{{ 'pdf' if pv[a.id] == 'application/pdf' else 'img' }}"
+    >View</button>{% endif %}</td>
 <td>{{ names[a.kind].get(a.ref_id, '#' ~ a.ref_id) if a.kind in names else a.kind ~ '#' ~ a.ref_id }}</td>
 <td><form method="post" action="/files/{{ a.id }}/reassign" class="inline">
 <select name="target">
@@ -195,5 +201,37 @@ document.querySelectorAll('form.iepick').forEach(f => {
   if (kind) kind.addEventListener('change', scope);
   fillRep(); scope();
 });
+</script>
+<dialog id="pv" class="pv">
+  <div class="pv-head">
+    <b id="pv-name"></b>
+    <span class="row">
+      <a class="btn small ghost" id="pv-tab" target="_blank" rel="noopener">New tab</a>
+      <a class="btn small ghost" id="pv-dl">Download</a>
+      <button type="button" class="btn small" id="pv-close">Close</button>
+    </span>
+  </div>
+  <div class="pv-body" id="pv-body"></div>
+</dialog>
+<script>
+(function () {
+  const dlg = document.getElementById('pv'), body = document.getElementById('pv-body');
+  function show(id, name, kind) {
+    document.getElementById('pv-name').textContent = name;
+    document.getElementById('pv-tab').href = '/files/' + id + '/preview';
+    document.getElementById('pv-dl').href = '/files/' + id + '/download';
+    const el = document.createElement(kind === 'pdf' ? 'iframe' : 'img');
+    el.src = '/files/' + id + '/preview';
+    if (kind !== 'pdf') el.alt = name;
+    body.replaceChildren(el);
+    dlg.showModal();
+  }
+  // Emptied on close so a large PDF is not left rendering behind the page.
+  // Catches Esc too, which closes the dialog without going through Close.
+  dlg.addEventListener('close', () => body.replaceChildren());
+  document.getElementById('pv-close').onclick = () => dlg.close();
+  document.querySelectorAll('button.pv-open').forEach(b =>
+    b.onclick = () => show(b.dataset.id, b.dataset.name, b.dataset.kind));
+})();
 </script>
 {% endblock %}

@@ -633,3 +633,24 @@ when late.
 Marking a dataroom submission Met records it as the pursuit's submitted date, so
 the two cannot drift apart. Commitments appear on the pursuit record and as a
 next-commitment column on the acceptance portfolio.
+
+## v32 - Preview PDFs and images without downloading
+The Files table offers **View** on any row the browser can actually render. It
+opens in a full-height dialog with New tab / Download / Close in the header and
+Esc to dismiss; the body is emptied on close so a large PDF is not left
+rendering behind the page.
+
+`/files/{id}/preview` serves the same bytes as `/download`, minus the
+`filename=` that makes it an attachment, plus `X-Content-Type-Options: nosniff`.
+The allowlist is PDF, PNG, JPEG, GIF and WEBP, and it is short on purpose: a
+browser will run script inside an HTML or SVG file served from our own origin,
+and these are documents from outside parties, so everything else keeps forcing a
+download. Anything off the list, and anything whose file has gone from disk,
+falls through to `/download`.
+
+Fixed alongside: `/download` raised a 500 when the row outlived the file (a
+restore onto a fresh disk, a manual tidy of the uploads directory). It now
+returns to the Files page saying so.
+
+Not covered: .docx and .xlsx, which browsers cannot render. mammoth.js /
+SheetJS client-side would do it for free if that turns out to matter.

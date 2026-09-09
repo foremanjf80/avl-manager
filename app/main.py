@@ -1704,6 +1704,17 @@ def _ie_targets(c):
              "status": r["status"]})
     return rows, {"tree": tree, "reports": reports}
 
+# Types the browser can render in place. The list is deliberately short: a
+# browser will execute script inside an HTML or SVG file served from our own
+# origin, and these are documents from outside parties, so anything not named
+# here keeps forcing a download instead.
+PREVIEW_TYPES = {".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg",
+                 ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
+
+def preview_type(filename):
+    """The media type to render this file as, or None if it must be downloaded."""
+    return PREVIEW_TYPES.get(os.path.splitext(filename or "")[1].lower())
+
 def _files_context(c):
     products = c.execute("SELECT id, name FROM products ORDER BY name").fetchall()
     avls = c.execute("SELECT id, name FROM avls ORDER BY name").fetchall()
@@ -1743,6 +1754,9 @@ def files(request: Request, kind: str = "", ref: int = 0, user=Depends(require_u
             q += " AND ref_id=?"
             params.append(ref)
     atts = c.execute(q + " ORDER BY id DESC", params).fetchall()
+    # Which rows the browser can show in place, so the table offers View only
+    # where it will actually work.
+    pv = {a["id"]: preview_type(a["filename"]) for a in atts}
     # How many files sit under each bundle target, so the download side can say
     # up front whether there is anything to fetch.
     counts = {"product": {}, "avl": {}, "call": {}, "checklist": {}}
@@ -1757,7 +1771,8 @@ def files(request: Request, kind: str = "", ref: int = 0, user=Depends(require_u
         "avls": avls, "calls": calls_, "checks": checks, "atts": atts, "names": names,
         "picker": picker, "f_kind": kind, "f_ref": ref, "bundle_kinds": BUNDLE_KINDS,
         "ie_rows": ie_rows, "ie_picker": ie_picker, "ie_bundle_kinds": IE_BUNDLE_KINDS,
-        "counts": counts, "n_checklists": n_checklists, "n_combos": n_combos})
+        "counts": counts, "n_checklists": n_checklists, "n_combos": n_combos,
+        "pv": pv})
 
 @app.post("/files/upload")
 async def upload(request: Request, kind: str = Form(...), ref_id: int = Form(...),
@@ -1997,7 +2012,30 @@ def download(att_id: int, request: Request, user=Depends(require_user)):
     c.close()
     if not row:
         return RedirectResponse("/files", status_code=303)
+    if not os.path.exists(row["stored_path"]):
+        # The row outlived the file - a restore onto a fresh disk, or a manual
+        # tidy-up of the uploads directory. Say so rather than raise a 500.
+        return RedirectResponse("/files?err=gone", status_code=303)
     return FileResponse(row["stored_path"], filename=row["filename"])
+
+@app.get("/files/{att_id}/preview")
+def preview(att_id: int, request: Request, user=Depends(require_user)):
+    """The same file as /download, served to be rendered rather than saved."""
+    c = db.conn()
+    row = c.execute("SELECT * FROM attachments WHERE id=?", (att_id,)).fetchone()
+    c.close()
+    if not row:
+        return RedirectResponse("/files", status_code=303)
+    media = preview_type(row["filename"])
+    if not media or not os.path.exists(row["stored_path"]):
+        # Not renderable, or the file is gone. Download already handles both.
+        return RedirectResponse(f"/files/{att_id}/download", status_code=303)
+    # No filename= here: that sets Content-Disposition: attachment and the
+    # browser saves instead of rendering. nosniff pins the type we declared, so
+    # a file cannot be re-interpreted as something the browser would execute.
+    return FileResponse(row["stored_path"], media_type=media, headers={
+        "Content-Disposition": f'inline; filename="{_safe(row["filename"])}"',
+        "X-Content-Type-Options": "nosniff"})
 
 # ---------------- 10) TPO-side contacts ----------------
 @app.get("/contacts", response_class=HTMLResponse)
