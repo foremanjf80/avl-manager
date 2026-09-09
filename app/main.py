@@ -1539,7 +1539,8 @@ def admin(request: Request, user=Depends(require_admin)):
         "auth_mode": AUTH_MODE, "allowlist": _auth.REQUIRE_KNOWN_USER,
         "admin_emails": sorted(_auth.ADMIN_EMAILS),
         "n_admins": sum(1 for u in users if u["role"] == "admin"),
-        "warnings": _auth.startup_warnings(), "domain": ALLOWED_DOMAIN})
+        "warnings": _auth.startup_warnings(), "domain": ALLOWED_DOMAIN,
+        "disk": _disk_usage()})
 
 @app.post("/admin/user/add")
 def admin_add_user(request: Request, email: str = Form(...), name: str = Form(""),
@@ -1594,6 +1595,57 @@ def set_role(request: Request, email: str = Form(...), role: str = Form(...),
     c.commit(); c.close()
     db.log(user["email"], "role", f"{email} -> {role}")
     return RedirectResponse("/admin", status_code=303)
+
+def _human(n):
+    """Bytes as something readable at a glance."""
+    for unit, step in (("GB", 1024 ** 3), ("MB", 1024 ** 2), ("KB", 1024)):
+        if n >= step:
+            return f"{n / step:,.1f} {unit}"
+    return f"{n:,} B"
+
+def _disk_usage():
+    """What is on the disk, and how much room is left on it.
+
+    Packages are counted apart from documents because they are the line that
+    grows fastest: every dataroom revision stores a zip holding a copy of every
+    document that went into it, so three revisions of one package can cost more
+    than the documents themselves.
+    """
+    def tree(path):
+        files = size = 0
+        for root, _dirs, names in os.walk(path):
+            for n in names:
+                try:
+                    size += os.path.getsize(os.path.join(root, n))
+                    files += 1
+                except OSError:      # vanished between listing and sizing
+                    pass
+        return files, size
+
+    n_pkg, s_pkg = tree(PKG_DIR)
+    n_all, s_all = tree(UPLOAD_DIR)          # documents *and* packages
+    n_bak, s_bak = tree(db.BACKUP_DIR)
+    s_db = 0
+    # The -wal and -shm files sit beside the database and cost the same disk.
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            s_db += os.path.getsize(db.DB_PATH + suffix)
+        except OSError:
+            pass
+    rows = [("Documents", n_all - n_pkg, s_all - s_pkg),
+            ("Dataroom packages", n_pkg, s_pkg),
+            ("Database", 1, s_db),
+            ("Local snapshots", n_bak, s_bak)]
+    used = sum(r[2] for r in rows)
+    try:
+        du = shutil.disk_usage(os.path.dirname(os.path.abspath(db.DB_PATH)) or ".")
+        total, free = du.total, du.free
+    except OSError:
+        total = free = 0
+    return {"rows": [(lbl, n, _human(b)) for lbl, n, b in rows],
+            "used": _human(used), "used_bytes": used,
+            "total": _human(total), "free": _human(free),
+            "pct": round(100 * (total - free) / total) if total else 0}
 
 def _upload_count():
     try:

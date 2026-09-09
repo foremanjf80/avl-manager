@@ -63,6 +63,20 @@ Useful as a way back in if the last admin role is ever lost.</li>
 <p class="hint">There {{ 'is' if n_admins == 1 else 'are' }} <b>{{ n_admins }}</b>
 admin{{ '' if n_admins == 1 else 's' }}. The app will not let you remove or demote the last one.</p>
 
+<h3>Storage</h3>
+<table class="list"><tr><th>What</th><th>Items</th><th>Size</th></tr>
+{% for label, n, size in disk.rows %}<tr><td>{{ label }}</td>
+<td class="sub2">{{ '{:,}'.format(n) }}</td><td>{{ size }}</td></tr>{% endfor %}
+<tr><td><b>The app is using</b></td><td></td><td><b>{{ disk.used }}</b></td></tr></table>
+{% if disk.total != '0 B' %}
+<p class="hint">The volume holds <b>{{ disk.total }}</b>, of which <b>{{ disk.free }}</b>
+is free &mdash; <b>{{ disk.pct }}%</b> used.
+{% if disk.pct >= 80 %}<span class="err">Grow the disk before it fills.</span>{% endif %}</p>
+{% endif %}
+<p class="hint">Packages are the line to watch: each dataroom revision stores a zip
+containing a copy of every document in it, so they outgrow the documents. On Render a disk
+can be made bigger but never smaller, so grow it a few GB at a time.</p>
+
 <h3>Backup</h3>
 <a class="btn" href="/admin/backup">Download database now</a>
 <p class="hint"><b>The database is not the documents.</b> It records the path of every
