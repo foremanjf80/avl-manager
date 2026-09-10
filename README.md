@@ -706,3 +706,29 @@ numbering - `2000 EQUIPMENT REVIEW - BATTERY/2003 Single line diagram.../file.pd
 - with the filled data request at the root, so the zip is the whole submission.
 Paths are trimmed hard because Windows still stops at 260 characters and these
 get unzipped into somebody's Downloads folder.
+
+## v35 - Who owns an IE review, and who owes each item
+The item-level Owner column was never holding owners. It held the internal team
+that owes the evidence - SQT, Dev. PM, RBO planning / CE - copied from the
+tracker's suggested-owner column, and those labels were being offered inside a
+picker whose options were the AVL roster, sales reps included. A team and a
+person in one control, on eighty-eight rows.
+
+Split into three:
+
+- **The review has one owner.** `ie_reports` gained owner / owner_person_id -
+  Commercial Engineering runs these, one named person per review.
+- **Each item names a source team**, as a plain label. Free text on purpose: the
+  real values are composites like "Dev. PM / SQA - Phase 1 RETC - Phase 2" that
+  no dropdown models honestly.
+- **The item owner is now an override**, blank by default and reading as the
+  report owner. Set it only when somebody other than the review owner genuinely
+  owes that item.
+
+The person picker groups Commercial Engineering first and leaves Sales out, for
+the same reason Sales is left out of the product/technical rep picker - a
+reviewer's questions are technical. Anyone already assigned stays selectable
+regardless, so opening the page can never silently drop a deliberate assignment.
+
+Existing rows migrate: an item's owner text moves to source_team wherever no
+person had actually been picked. Where someone had chosen a person, that stands.

@@ -2626,8 +2626,10 @@ def ie_report_add(request: Request, product_id: int = Form(...), template_id: in
         sid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
         for i in c.execute("SELECT * FROM ie_template_items WHERE section_id=? "
                            "ORDER BY sort_order, id", (s["id"],)).fetchall():
+            # The tracker's suggested owner is a team, not a person, so it lands
+            # in source_team. The person comes from the report.
             c.execute("INSERT INTO ie_report_items(report_id, section_id, item_id, sub_section, "
-                      "review_item, evidence, priority, source, owner, sort_order, "
+                      "review_item, evidence, priority, source, source_team, sort_order, "
                       "updated_by, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                       (rid, sid, i["item_id"], i["sub_section"], i["review_item"], i["evidence"],
                        i["priority"], i["source"], i["suggested_owner"], i["sort_order"],
@@ -2656,6 +2658,14 @@ def ie_report(request: Request, rid: int, only: str = "", user=Depends(require_u
             elif only == "nofile":
                 g["items"] = [i for i in g["items"] if not atts.get(i["id"])]
     people = c.execute("SELECT id, name, org FROM people WHERE active=1 ORDER BY name").fetchall()
+    # Anyone already named anywhere on this review stays selectable even if their
+    # org would normally be left out, so opening the page cannot silently drop an
+    # assignment somebody made on purpose.
+    held = {r["owner_person_id"]}
+    for g in groups:
+        held.add(g["sec"]["owner_person_id"])
+        held.update(i["owner_person_id"] for i in g["items"])
+    ie_people = db.ie_owner_options(people, held_ids={h for h in held if h})
     avls = c.execute("SELECT id, name FROM avls WHERE active=1 ORDER BY name").fetchall()
     # The other direction of the dataroom link: which TPO requirements this answers.
     satisfies = c.execute(
@@ -2665,6 +2675,7 @@ def ie_report(request: Request, rid: int, only: str = "", user=Depends(require_u
         "WHERE ci.ie_report_id=? ORDER BY a.name", (rid,)).fetchall()
     c.close()
     return templates.TemplateResponse(request, "ie_report.html", {"user": user, "r": r,
+        "ie_people": ie_people,
         "satisfies": satisfies,
         "groups": groups, "totals": totals, "atts": atts, "sec_atts": sec_atts,
         "people": people, "avls": avls,
@@ -2675,12 +2686,14 @@ def ie_report(request: Request, rid: int, only: str = "", user=Depends(require_u
 def ie_report_save(rid: int, request: Request, name: str = Form(...), reviewer: str = Form("DNV"),
                    status: str = Form("Planning"), kickoff_date: str = Form(""),
                    target_date: str = Form(""), shared_with: str = Form(""),
+                   owner_person_id: str = Form(""), owner_other: str = Form(""),
                    notes: str = Form(""), user=Depends(require_editor)):
     c = db.conn()
+    oid, oname = _person(c, owner_person_id)
     c.execute("UPDATE ie_reports SET name=?, reviewer=?, status=?, kickoff_date=?, target_date=?, "
-              "shared_with=?, notes=? WHERE id=?",
+              "shared_with=?, owner=?, owner_person_id=?, notes=? WHERE id=?",
               (name.strip(), reviewer, status, kickoff_date, target_date,
-               shared_with.strip(), notes.strip(), rid))
+               shared_with.strip(), oname or owner_other.strip(), oid, notes.strip(), rid))
     c.commit(); c.close()
     db.log(user["email"], "ie:report:save", f"{name.strip()} -> {status}")
     return RedirectResponse(f"/ie/report/{rid}", status_code=303)
@@ -2697,7 +2710,8 @@ def ie_report_delete(rid: int, request: Request, user=Depends(require_admin)):
 
 @app.post("/ie/item/{iid}/save")
 def ie_item_save(iid: int, request: Request, status: str = Form(...),
-                 owner_person_id: str = Form(""), owner_other: str = Form(""),
+                 source_team: str = Form(""), owner_person_id: str = Form(""),
+                 owner_other: str = Form(""),
                  due_date: str = Form(""), priority: str = Form("Normal"),
                  gap: str = Form(""), notes: str = Form(""), user=Depends(require_editor)):
     if status not in db.IE_ITEM_STATUSES:
@@ -2705,21 +2719,18 @@ def ie_item_save(iid: int, request: Request, status: str = Form(...),
     if priority not in db.IE_PRIORITIES:
         priority = "Normal"
     c = db.conn()
-    row = c.execute("SELECT report_id, review_item, owner FROM ie_report_items WHERE id=?",
+    row = c.execute("SELECT report_id, review_item FROM ie_report_items WHERE id=?",
                     (iid,)).fetchone()
     if not row:
         c.close()
         return RedirectResponse("/ie", status_code=303)
-    oid = int(owner_person_id) if owner_person_id.strip().isdigit() and int(owner_person_id) > 0 else None
-    oname = ""
-    if oid:
-        p = c.execute("SELECT name FROM people WHERE id=? AND active=1", (oid,)).fetchone()
-        oname, oid = (p["name"], oid) if p else ("", None)
-    owner_txt = oname or owner_other.strip() or (row["owner"] if not oid else "")
-    c.execute("UPDATE ie_report_items SET status=?, owner=?, owner_person_id=?, due_date=?, "
-              "priority=?, gap=?, notes=?, updated_by=?, updated_at=? WHERE id=?",
-              (status, owner_txt, oid, due_date, priority, gap.strip(), notes.strip(),
-               user["email"], now(), iid))
+    # Both owner controls round-trip their current value in the form, so an empty
+    # submission is a deliberate clear - the item falls back to the report owner.
+    oid, oname = _person(c, owner_person_id)
+    c.execute("UPDATE ie_report_items SET status=?, source_team=?, owner=?, owner_person_id=?, "
+              "due_date=?, priority=?, gap=?, notes=?, updated_by=?, updated_at=? WHERE id=?",
+              (status, source_team.strip(), oname or owner_other.strip(), oid, due_date,
+               priority, gap.strip(), notes.strip(), user["email"], now(), iid))
     c.commit(); c.close()
     db.log(user["email"], "ie:item", f"{row['review_item'][:60]} -> {status}")
     return RedirectResponse(f"/ie/report/{row['report_id']}", status_code=303)
@@ -3036,6 +3047,13 @@ def ie_tmpl_undo(rev_id: int, request: Request, user=Depends(require_editor)):
     db.log(user["email"], "ie:template:undo", f"t{tid}: reverted '{action}'")
     return RedirectResponse(f"/ie/templates?t={tid}&undone={action}", status_code=303)
 
+def _person(c, raw):
+    """(id, name) for a roster pick, or (None, "") when nothing was chosen."""
+    if not str(raw).strip().isdigit() or int(raw) <= 0:
+        return None, ""
+    p = c.execute("SELECT name FROM people WHERE id=? AND active=1", (int(raw),)).fetchone()
+    return (int(raw), p["name"]) if p else (None, "")
+
 def _ie_dnv_fill(c, rid):
     """What is needed to hand the reviewer their own workbook back, filled in.
 
@@ -3147,8 +3165,8 @@ def ie_bundle(rid: int, request: Request, user=Depends(require_user)):
                 files = atts.get(it["id"], [])
                 summ.append([g["sec"]["title"], it["item_id"], it["sub_section"],
                              it["review_item"], it["evidence"], it["priority"], it["status"],
-                             it["owner"], it["due_date"], len(files),
-                             "INCLUDED" if files else "NO EVIDENCE", it["gap"]])
+                             it["source_team"], it["owner"] or r["owner"], it["due_date"],
+                             len(files), "INCLUDED" if files else "NO EVIDENCE", it["gap"]])
                 for f in files:
                     # Trimmed hard: Windows still stops at a 260-character path,
                     # and these get unzipped into somebody's Downloads folder.
@@ -3179,8 +3197,8 @@ def ie_bundle(rid: int, request: Request, user=Depends(require_user)):
             ["Section", "Item ID", "Review item", "Path in zip"], man))
         z.writestr("IE_SUMMARY.csv", csv_bytes(
             ["Section", "Item ID", "Sub-section", "Preparation item / review question",
-             "Required evidence", "Priority", "Status", "Owner", "Due", "Files", "Result",
-             "Gap / action"], summ))
+             "Required evidence", "Priority", "Status", "Source team", "Owner", "Due",
+             "Files", "Result", "Gap / action"], summ))
         L = ["IE TECHNOLOGY REVIEW - EVIDENCE SUMMARY", "=" * 62,
              f"Product      : {r['product']}",
              f"Report       : {r['name']}",

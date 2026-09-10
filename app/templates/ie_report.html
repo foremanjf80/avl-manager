@@ -8,7 +8,8 @@ template was not imported from a workbook, so there is no reviewer file to fill.
 request on <a href="/ie/templates">IE templates</a> and start a review from it.</p>{% endif %}
 {% if request.query_params.get('err') == 'fillfailed' %}<p class="hint" style="color:#b00">The workbook
 could not be written. It may have been moved off the disk.</p>{% endif %}
-<p class="hint"><a href="/ie">All IE reviews</a> &middot; {{ r.product }} ({{ r.category }})</p>
+<p class="hint"><a href="/ie">All IE reviews</a> &middot; {{ r.product }} ({{ r.category }})
+&middot; managed by <b>{{ r.owner or 'nobody yet' }}</b>{% if r.owner %} (Commercial Engineering){% endif %}</p>
 {% if request.query_params.get('err') == 'files' %}
 <p class="hint" style="color:#b00">That item still has evidence attached. Re-file it on <a href="/files">Files</a> first.</p>{% endif %}
 
@@ -20,6 +21,13 @@ could not be written. It may have been moved off the disk.</p>{% endif %}
 <input name="kickoff_date" type="date" value="{{ r.kickoff_date }}" title="Kickoff">
 <input name="target_date" type="date" value="{{ r.target_date }}" title="Target">
 <input name="shared_with" value="{{ r.shared_with }}" size="24" placeholder="Shared with (TPOs)">
+<span class="sub2" style="align-self:center">Managed by</span>
+<select name="owner_person_id"><option value="">- nobody yet -</option>
+{% for label, rows in ie_people %}<optgroup label="{{ label }}">
+{% for p in rows %}<option value="{{ p.id }}" {% if r.owner_person_id==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+</optgroup>{% endfor %}</select>
+<input name="owner_other" value="{{ r.owner if not r.owner_person_id else '' }}" size="14"
+  placeholder="or free text">
 <input name="notes" value="{{ r.notes }}" size="28" placeholder="Notes">
 <button>Save</button></form></div>
 
@@ -83,7 +91,7 @@ as a plain gap, and name its status.</p></div>
 <input type="hidden" name="next_url" value="/ie/report/{{ r.id }}{% if only %}?only={{ only }}{% endif %}#s{{ g.sec.id }}">
 <input type="file" name="f" required style="width:130px"><button>Attach to section</button></form></div>
 
-<table class="list"><tr><th>ID</th><th>Sub-section / review question</th><th></th><th>Status</th><th>Owner</th><th>Due</th><th>Gap / action</th><th></th></tr>
+<table class="list"><tr><th>ID</th><th>Sub-section / review question</th><th></th><th>Status</th><th>Source team</th><th>Owner</th><th>Due</th><th>Gap / action</th><th></th></tr>
 {% for i in g['items'] %}<tr>
 <td class="sub2 nowrap">{{ i.item_id }}</td>
 <td class="wrap"><b>{{ i.sub_section }}</b><div>{{ i.review_item }}</div>
@@ -93,14 +101,20 @@ as a plain gap, and name its status.</p></div>
 <form method="post" action="/ie/item/{{ i.id }}/save">
 <td><select name="status" class="cs-{{ i.status|replace(' ','') }}">{% for st in item_statuses %}<option {% if i.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select>
 <select name="priority">{% for p in priorities %}<option {% if i.priority==p %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></td>
-<td><select name="owner_person_id"><option value="">- {{ i.owner or 'unassigned' }} -</option>
-{% for p in people %}<option value="{{ p.id }}" {% if i.owner_person_id==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
-<input name="owner_other" size="12" placeholder="or free text"></td>
+<td><input name="source_team" value="{{ i.source_team }}" size="14"
+  placeholder="Source team" title="The internal team that owes this evidence"></td>
+<td><select name="owner_person_id">
+<option value="">{{ ('\u2014 ' ~ r.owner) if r.owner else '\u2014 report owner' }}</option>
+{% for label, rows in ie_people %}<optgroup label="{{ label }}">
+{% for p in rows %}<option value="{{ p.id }}" {% if i.owner_person_id==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+</optgroup>{% endfor %}</select>
+<input name="owner_other" value="{{ i.owner if not i.owner_person_id else '' }}" size="10"
+  placeholder="or free text"></td>
 <td><input name="due_date" value="{{ i.due_date }}" size="9" placeholder="End Aug"></td>
 <td><input name="gap" value="{{ i.gap }}" size="24" placeholder="Gap / action required">
 <input name="notes" value="{{ i.notes }}" size="20" placeholder="Notes"></td>
 <td><button>Save</button></td></form></tr>
-<tr class="attrow"><td></td><td colspan="5" class="sub2">
+<tr class="attrow"><td></td><td colspan="6" class="sub2">
 {% for f in atts.get(i.id, []) %}<a href="/files/{{ f.id }}/download">{{ f.filename }}</a>{% if not loop.last %} &middot; {% endif %}{% else %}<span class="hint">no evidence attached</span>{% endfor %}</td>
 <td colspan="2"><form method="post" action="/files/upload" enctype="multipart/form-data" class="inline">
 <input type="hidden" name="kind" value="ie_item"><input type="hidden" name="ref_id" value="{{ i.id }}">
@@ -108,7 +122,7 @@ as a plain gap, and name its status.</p></div>
 <input type="file" name="f" required style="width:130px"><button>Attach</button></form>
 <form method="post" action="/ie/item/{{ i.id }}/delete" class="inline"
       onsubmit="return confirm('Remove this review item from the report?')"><button>&times;</button></form></td></tr>
-{% else %}<tr><td colspan="8" class="hint">No items match the filter.</td></tr>{% endfor %}</table>
+{% else %}<tr><td colspan="9" class="hint">No items match the filter.</td></tr>{% endfor %}</table>
 
 <form method="post" action="/ie/report/{{ r.id }}/item/add" class="row" style="margin-bottom:14px">
 <input type="hidden" name="section_id" value="{{ g.sec.id }}">

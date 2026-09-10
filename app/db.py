@@ -44,6 +44,34 @@ ORG_ROLE_EXCLUDE = {
     ROLES[2]: ("Sales",),
 }
 
+# Who can run an independent-engineering review. Commercial Engineering owns
+# these, so CE is offered first; Sales is left out for the same reason it is left
+# out of the product/technical rep picker - a reviewer's questions are technical.
+IE_OWNER_ORGS_FIRST = ("Products / CE",)
+IE_OWNER_ORGS_EXCLUDE = ("Sales",)
+
+def ie_owner_options(people, held_ids=()):
+    """Roster grouped for an IE review: CE first, Sales left out.
+
+    Anyone already assigned anywhere on the review is kept in the list even if
+    their org would exclude them, so opening a form can never silently drop an
+    assignment somebody made deliberately.
+    """
+    groups, seen = [], set()
+    for label, want in (("Commercial Engineering", IE_OWNER_ORGS_FIRST), ("Other teams", None)):
+        rows = []
+        for p in people:
+            if p["id"] in seen:
+                continue
+            if want is not None and p["org"] not in want:
+                continue
+            if want is None and p["org"] in IE_OWNER_ORGS_EXCLUDE and p["id"] not in held_ids:
+                continue
+            rows.append(p); seen.add(p["id"])
+        if rows:
+            groups.append((label, rows))
+    return groups
+
 def role_options(people, role, held_ids=()):
     """Grouped picker options for one seat: [(group label, [people]), ...].
 
@@ -278,6 +306,27 @@ def _migrate(c):
     it_ = [r[1] for r in c.execute("PRAGMA table_info(ie_templates)")]
     if it_ and "source_path" not in it_:
         c.execute("ALTER TABLE ie_templates ADD COLUMN source_path TEXT DEFAULT ''")
+        c.commit()
+    # An IE review is run by one person, and every item on it was being asked to
+    # name an owner separately - eighty-eight pickers agreeing with each other.
+    # The person belongs on the report.
+    irp = [r[1] for r in c.execute("PRAGMA table_info(ie_reports)")]
+    if irp and "owner_person_id" not in irp:
+        c.execute("ALTER TABLE ie_reports ADD COLUMN owner TEXT DEFAULT ''")
+        c.execute("ALTER TABLE ie_reports ADD COLUMN owner_person_id INTEGER "
+                  "REFERENCES people(id) ON DELETE SET NULL")
+        c.commit()
+    # The item-level owner was never holding owners. It held the internal team
+    # that owes the evidence - SQT, Dev. PM, RBO planning / CE - copied from the
+    # tracker, and those were being offered in the same control as named people.
+    # Split them: the team is a label, the owner is a person.
+    iri = [r[1] for r in c.execute("PRAGMA table_info(ie_report_items)")]
+    if iri and "source_team" not in iri:
+        c.execute("ALTER TABLE ie_report_items ADD COLUMN source_team TEXT DEFAULT ''")
+        # Only where no person was ever picked: an owner_person_id means somebody
+        # made a real assignment, and that is not a team label to be moved.
+        c.execute("UPDATE ie_report_items SET source_team = owner, owner = '' "
+                  "WHERE owner_person_id IS NULL AND COALESCE(owner,'') <> ''")
         c.commit()
 
 def _seed_team(c):
