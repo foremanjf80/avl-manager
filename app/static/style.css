@@ -31,6 +31,7 @@ button,.btn{background:var(--blue);color:#fff;border:0;border-radius:4px;padding
 .matrix select{width:100%;border:0;background:transparent;font-size:13.5px;color:#222}
 .s-Listed{background:#C6EFCE}.s-InReview{background:#BDD7EE}.s-Execution{background:#A8F0EA}
 .s-Engagement{background:#FCD9C4}.s-Opportunity{background:#FCE4D6}.s-NoInterest{background:#F8CBAD}
+.s-Delisted{background:#FFC7CE;color:#8a0016}.s-Delisted select{color:#8a0016;font-weight:bold}
 .s-NoInfo{background:#FFF2CC}.s-NA{background:#fff}.s-Prelaunch{background:#EDEDED}
 .list th,.list td{border-bottom:1px solid #d8d8d8;padding:8px 9px;text-align:left;
   font-size:14px;line-height:1.45}

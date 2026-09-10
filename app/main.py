@@ -307,6 +307,28 @@ def add_avl(request: Request, name: str = Form(...), account_manager_id: str = F
     db.log(user["email"], "avl:add", name)
     return RedirectResponse("/manage", status_code=303)
 
+@app.post("/avls/{aid}/rename")
+def rename_avl(aid: int, request: Request, name: str = Form(...), user=Depends(require_editor)):
+    """TPOs rebrand - HDM Renewable Finance becomes Maxwell.
+
+    The name lives in one column and nothing copies it, so this really is a
+    rename: every listing, call, contact, action and package already points at
+    the row by id and follows on its own.
+    """
+    nm = name.strip()
+    c = db.conn()
+    row = c.execute("SELECT name FROM avls WHERE id=?", (aid,)).fetchone()
+    if not row or not nm or nm == row["name"]:
+        c.close()
+        return RedirectResponse("/manage", status_code=303)
+    if c.execute("SELECT 1 FROM avls WHERE lower(name)=lower(?) AND id<>?", (nm, aid)).fetchone():
+        c.close()
+        return RedirectResponse("/manage?err=dupavl", status_code=303)
+    c.execute("UPDATE avls SET name=? WHERE id=?", (nm, aid))
+    c.commit(); c.close()
+    db.log(user["email"], "avl:rename", f"{row['name']} renamed to {nm}")
+    return RedirectResponse("/manage?renamed=1", status_code=303)
+
 @app.post("/avls/{aid}/toggle")
 def toggle_avl(aid: int, request: Request, user=Depends(require_editor)):
     c = db.conn()
@@ -536,7 +558,7 @@ def exec_dash(request: Request, month: str = "", user=Depends(require_user)):
         "JOIN products p ON p.id=h.product_id JOIN avls a ON a.id=h.avl_id "
         "WHERE substr(h.ts,1,7)=? ORDER BY h.ts", (month,)).fetchall()
     wins = [r for r in changes if r["new_status"] in db.LISTED_STATUSES]
-    risks = [r for r in changes if r["new_status"] in ("No Interest", "N/A")]
+    risks = [r for r in changes if r["new_status"] in ("No Interest", "N/A") + db.LOST_STATUSES]
     calls_month = c.execute(
         "SELECT a.name AS avl_name, COUNT(*) AS n FROM calls JOIN avls a ON a.id=calls.avl_id "
         "WHERE substr(call_date,1,7)=? GROUP BY a.name ORDER BY n DESC", (month,)).fetchall()

@@ -3,13 +3,19 @@ import sqlite3, os, datetime, re
 
 DB_PATH = os.environ.get("AVL_DB", os.path.join(os.path.dirname(__file__), "..", "avl.db"))
 
-STATUSES = ["Listed", "Listed, Conditional", "In Review", "Execution", "Engagement",
-            "Opportunity", "No Interest", "No Info", "N/A", "Pre-launch"]
+STATUSES = ["Listed", "Listed, Conditional", "Delisted", "In Review", "Execution",
+            "Engagement", "Opportunity", "No Interest", "No Info", "N/A", "Pre-launch"]
 
 # A conditional listing still counts as on the AVL, but carries conditions that
 # have to be met to keep it or to have it lifted - so it is reported separately
 # wherever "how many are listed" is being asked.
 LISTED_STATUSES = ("Listed", "Listed, Conditional")
+
+# Removed from an AVL after having been on it - a quality hold, a failed audit, a
+# withdrawn certification. It sits next to the listing states rather than down
+# with the cold ones because it is what happened to a listing, and it is the one
+# status worth noticing the day it changes.
+LOST_STATUSES = ("Delisted",)
 
 ROLES = ["Account Manager (Sales)", "Sr. Commercial Rep (Sales)", "Product/Technical Rep (CE)"]
 

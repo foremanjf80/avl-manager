@@ -37,9 +37,12 @@
 <button>Add</button></form></div>
 
 <div class="card"><h2>TPO AVLs</h2>
+{% if request.query_params.get('err') == 'dupavl' %}<p class="hint" style="color:#b00">Another AVL already has that name.</p>{% endif %}
+{% if request.query_params.get('renamed') %}<p class="hint" style="color:#2e7d32">Renamed. Everything filed against this TPO followed it &mdash; the name is stored in one place.</p>{% endif %}
 <table class="list"><tr><th>AVL</th><th>Account Manager</th><th>Sr. Commercial Rep</th><th></th></tr>
 {% for a in avls %}<tr class="{{ 'inactive' if not a.active }}">
-<td>{{ a.name }}</td>
+<td><form method="post" action="/avls/{{ a.id }}/rename" class="inline">
+<input name="name" value="{{ a.name }}" size="19" required><button title="Rename this TPO">Rename</button></form></td>
 <td colspan="2"><form method="post" action="/avls/{{ a.id }}/managers" class="inline">
 <select name="account_manager_id"><option value="">- vacant -</option>
 {% for label, folk in avl_opts.get(a.id, {}).get("am", []) %}<optgroup label="{{ label }}">

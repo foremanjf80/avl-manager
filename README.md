@@ -749,3 +749,18 @@ Free text is deliberately left alone. A label like "Sarah O. / Legal / RBO /
 MKTG" is a note about which teams owe something, not a link to a person, and
 rewriting names inside prose is how prose gets corrupted. Those are edited by
 hand, if they are worth editing at all.
+
+## v37 - Delisted, and renaming a TPO
+**Delisted** joins the status list: removed from an AVL after having been on it -
+a quality hold, a failed audit, a withdrawn certification. It sits immediately
+after the two listed states rather than down among the cold ones, because it is
+what happened to a listing and it is the one status worth noticing the day it
+changes. Red cell, and it drops straight out of every "how many are listed"
+count because those read LISTED_STATUSES. On the exec dashboard it is reported
+alongside the other risks, since a delisting outranks anything already there.
+
+**Renaming a TPO** is a field on the Manage page - HDM Renewable Finance becomes
+Maxwell. It really is just a rename: the name lives in one column and nothing
+copies it, so every listing, call, contact, action, commitment and package
+already points at the row by id and follows on its own. Duplicate names are
+refused case-insensitively, and the change is audited with both names.
