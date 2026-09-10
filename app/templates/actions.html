@@ -44,6 +44,7 @@
 <option value="open" {% if show=='open' %}selected{% endif %}>Open only</option>
 <option value="all" {% if show=='all' %}selected{% endif %}>All</option></select>
 <select name="avl" onchange="this.form.submit()"><option value="0">All TPOs</option>
+<option value="-1" {% if sel_a==-1 %}selected{% endif %}>General (no TPO)</option>
 {% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel_a %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
 <select name="owner" onchange="this.form.submit()"><option value="0">Any owner</option>
 {% for p in people %}<option value="{{ p.id }}" {% if p.id==sel_o %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
@@ -61,7 +62,8 @@
 <td>{% if r.priority and r.priority != 'Normal' %}<span class="ob ob-{{ 'Required' if r.priority=='High' else 'Optional' }}">{{ r.priority }}</span>{% endif %}</td>
 <td class="wrap">{{ r.description }}</td>
 <td>{{ r.owner_name or r.owner or '-' }}</td>
-<td class="sub2">{% if r.avl_name %}<b>{{ r.avl_name }}</b>{% endif %}
+<td class="sub2">{% if not r.avl_name and not r.product_name %}<span class="chip gen">General</span>{% endif %}
+{% if r.avl_name %}<b>{{ r.avl_name }}</b>{% endif %}
 {% if r.product_name %}<div>{{ r.product_name }}
 {% if r.avl_name %}<span class="ls ls-{{ (r.listing_status or 'Not tracked')|replace(' ','')|replace(',','')|replace('/','') }}">{{ r.listing_status or 'not tracked' }}</span>{% endif %}</div>{% endif %}
 {% if r.workstream %}<div>{{ r.product_name }} &mdash; {% if r.doc_category %}{{ r.doc_category }}: {% endif %}{{ r.workstream }}

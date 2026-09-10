@@ -874,7 +874,11 @@ def actions(request: Request, show: str = "open", avl: int = 0, owner: int = 0,
     params = []
     if show != "all":
         q += "AND actions.status='Open' "
-    if avl:
+    if avl == -1:
+        # Actions belonging to no AVL at all: a one-off task with no dataroom
+        # behind it. These were always storable; without this they were unfindable.
+        q += "AND actions.avl_id IS NULL AND actions.product_id IS NULL "
+    elif avl:
         q += "AND actions.avl_id=? "
         params.append(avl)
     if owner:
@@ -3446,7 +3450,7 @@ def _commitment_rows(c, where="", args=(), limit=300):
 
 @app.get("/schedule", response_class=HTMLResponse)
 def schedule(request: Request, show: str = "open", avl: int = 0, owner: int = 0,
-             user=Depends(require_user)):
+             edit: int = 0, user=Depends(require_user)):
     c = db.conn()
     where, args = "WHERE 1=1 ", []
     if show == "open":
@@ -3470,9 +3474,86 @@ def schedule(request: Request, show: str = "open", avl: int = 0, owner: int = 0,
                            and not r["rd"]["ready"])}
     return templates.TemplateResponse(request, "schedule.html", {"user": user, "rows": rows,
         "avls": avls, "products": products, "people": people, "show": show, "sel_a": avl,
-        "sel_o": owner, "tot": tot, "kinds": db.COMMITMENT_KINDS,
+        "sel_o": owner, "tot": tot, "kinds": db.COMMITMENT_KINDS, "edit": edit,
         "statuses": db.COMMITMENT_STATUSES, "today": datetime.date.today().isoformat(),
         "risk_days": db.AT_RISK_DAYS})
+
+def _timeline(rows, today=None):
+    """Commitments laid out on one date axis, grouped by TPO and product.
+
+    A commitment is a date rather than a duration, so the bar runs from the day
+    it was made to the day it falls due. That span is the run-up - the part
+    still worth acting on - and it is a real interval rather than an invented
+    one. Anything without a usable date is left out instead of drawn at a guess.
+    """
+    today = today or datetime.date.today().isoformat()
+
+    def day(v):
+        try:
+            return datetime.date.fromisoformat(str(v)[:10])
+        except (ValueError, TypeError):
+            return None
+
+    now_d, bars = day(today), []
+    for r in rows:
+        due = day(r["c"]["due_date"])
+        if not due:
+            continue
+        start = day(r["c"]["created_at"]) or due
+        bars.append({"r": r, "c": r["c"], "start": min(start, due), "due": due})
+    if not bars:
+        return None
+
+    lo = min([b["start"] for b in bars] + [now_d])
+    hi = max([b["due"] for b in bars] + [now_d])
+    pad = datetime.timedelta(days=max(4, (hi - lo).days // 14))
+    lo, hi = lo - pad, hi + pad
+    span = max(1, (hi - lo).days)
+
+    def pct(d):
+        return round(100.0 * (d - lo).days / span, 3)
+
+    groups = {}
+    for b in bars:
+        b["left"] = pct(b["start"])
+        # A commitment made and due on the same day still has to be visible.
+        b["width"] = max(0.8, pct(b["due"]) - b["left"])
+        key = (b["c"]["avl_name"], b["c"]["product"], b["c"]["avl_id"], b["c"]["product_id"])
+        groups.setdefault(key, []).append(b)
+    for v in groups.values():
+        v.sort(key=lambda b: b["due"])
+
+    ticks, m = [], datetime.date(lo.year, lo.month, 1)
+    while m <= hi:
+        if m >= lo:
+            ticks.append({"at": pct(m), "label": m.strftime("%b %Y")})
+        m = datetime.date(m.year + (m.month == 12), m.month % 12 + 1, 1)
+    return {"groups": [{"avl": k[0], "product": k[1], "avl_id": k[2], "product_id": k[3],
+                        "bars": v} for k, v in sorted(groups.items())],
+            "ticks": ticks, "today": pct(now_d),
+            "from": lo.isoformat(), "to": hi.isoformat()}
+
+@app.get("/schedule/timeline", response_class=HTMLResponse)
+def schedule_timeline(request: Request, show: str = "open", avl: int = 0, owner: int = 0,
+                      user=Depends(require_user)):
+    c = db.conn()
+    where, args = "WHERE 1=1 ", []
+    if show == "open":
+        where += "AND cm.status='Planned' "
+    elif show in ("Met", "Missed", "Cancelled"):
+        where += "AND cm.status=? "; args.append(show)
+    if avl:
+        where += "AND cm.avl_id=? "; args.append(avl)
+    if owner:
+        where += "AND cm.owner_person_id=? "; args.append(owner)
+    rows = _commitment_rows(c, where, args)
+    avls = c.execute("SELECT id, name FROM avls WHERE active=1 ORDER BY name").fetchall()
+    people = c.execute("SELECT id, name FROM people WHERE active=1 ORDER BY name").fetchall()
+    c.close()
+    return templates.TemplateResponse(request, "timeline.html", {"user": user,
+        "tl": _timeline(rows), "avls": avls, "people": people, "show": show,
+        "sel_a": avl, "sel_o": owner, "n": len(rows),
+        "today": datetime.date.today().isoformat()})
 
 @app.post("/schedule/add")
 def commitment_add(request: Request, avl_id: int = Form(...), product_id: int = Form(...),
@@ -3506,7 +3587,7 @@ def commitment_add(request: Request, avl_id: int = Form(...), product_id: int = 
 def commitment_save(cid: int, request: Request, due_date: str = Form(...),
                     kind: str = Form("Other"), label: str = Form(""),
                     owner_person_id: str = Form(""), owner_other: str = Form(""),
-                    notes: str = Form(""), next_url: str = Form(""),
+                    status: str = Form(""), notes: str = Form(""), next_url: str = Form(""),
                     user=Depends(require_editor)):
     dest = next_url if next_url.startswith("/") else "/schedule"
     c = db.conn()
@@ -3524,12 +3605,32 @@ def commitment_save(cid: int, request: Request, due_date: str = Form(...),
               "notes=? WHERE id=?",
               (due_date, kind if kind in db.COMMITMENT_KINDS else "Other", label.strip(),
                owner_txt, oid, notes.strip(), cid))
+    if status in db.COMMITMENT_STATUSES and status != row["status"]:
+        # Re-read first: the kind may have changed in the UPDATE above, and
+        # whether meeting this commitment records a submission on the pursuit
+        # depends on what it is now, not on what it was when the form opened.
+        row = c.execute("SELECT * FROM commitments WHERE id=?", (cid,)).fetchone()
+        _apply_commitment_status(c, row, status)
     c.commit(); c.close()
     db.log(user["email"], "commitment:save", f"{kind} -> {due_date}",
            avl_id=row["avl_id"], product_id=row["product_id"], entity="commitment")
     return RedirectResponse(dest, status_code=303)
 
 @app.post("/schedule/{cid}/status")
+def _apply_commitment_status(c, row, status):
+    """Set a commitment's status and the dates that follow from it.
+
+    Meeting a dataroom submission is the event the pursuit records as submitted,
+    so the two cannot drift apart. Moving off Met clears met_at but leaves the
+    pursuit's submitted date alone - that records something that actually
+    happened, and un-ticking a checkbox here did not un-happen it.
+    """
+    met = now()[:10] if status == "Met" else ""
+    c.execute("UPDATE commitments SET status=?, met_at=? WHERE id=?", (status, met, row["id"]))
+    if status == "Met" and row["kind"] == "Dataroom submission":
+        c.execute("UPDATE listings SET submitted_at=? WHERE avl_id=? AND product_id=? "
+                  "AND COALESCE(submitted_at,'')=''", (met, row["avl_id"], row["product_id"]))
+
 def commitment_status(cid: int, request: Request, status: str = Form(...),
                       next_url: str = Form(""), user=Depends(require_editor)):
     dest = next_url if next_url.startswith("/") else "/schedule"
@@ -3540,12 +3641,7 @@ def commitment_status(cid: int, request: Request, status: str = Form(...),
     if not row:
         c.close()
         return RedirectResponse(dest, status_code=303)
-    met = now()[:10] if status == "Met" else ""
-    c.execute("UPDATE commitments SET status=?, met_at=? WHERE id=?", (status, met, cid))
-    # Meeting a dataroom submission is the event the pursuit records as submitted.
-    if status == "Met" and row["kind"] == "Dataroom submission":
-        c.execute("UPDATE listings SET submitted_at=? WHERE avl_id=? AND product_id=? "
-                  "AND COALESCE(submitted_at,'')=''", (met, row["avl_id"], row["product_id"]))
+    _apply_commitment_status(c, row, status)
     c.commit(); c.close()
     db.log(user["email"], "commitment:status", f"{row['kind']} ({row['due_date']}) -> {status}",
            avl_id=row["avl_id"], product_id=row["product_id"], entity="commitment")

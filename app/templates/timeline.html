@@ -1,0 +1,72 @@
+{% extends "base.html" %}{% block body %}
+<div class="row" style="justify-content:space-between;align-items:baseline">
+<h2>Schedule timeline</h2>
+<a class="btn small ghost" href="/schedule?show={{ show }}&amp;avl={{ sel_a }}&amp;owner={{ sel_o }}">List view</a>
+</div>
+<p class="hint">Every commitment on one date axis, grouped by TPO and product. A bar runs from the day
+we made the commitment to the day it falls due &mdash; the run-up, which is the part still worth acting
+on. The red line is today.</p>
+
+<form method="get" action="/schedule/timeline" class="row" style="margin-bottom:12px">
+<select name="show" onchange="this.form.submit()">
+<option value="open" {% if show=='open' %}selected{% endif %}>Open</option>
+<option value="all" {% if show=='all' %}selected{% endif %}>All</option>
+<option value="Met" {% if show=='Met' %}selected{% endif %}>Met</option>
+<option value="Missed" {% if show=='Missed' %}selected{% endif %}>Missed</option>
+<option value="Cancelled" {% if show=='Cancelled' %}selected{% endif %}>Cancelled</option>
+</select>
+<select name="avl" onchange="this.form.submit()"><option value="0">All TPOs</option>
+{% for a in avls %}<option value="{{ a.id }}" {% if a.id==sel_a %}selected{% endif %}>{{ a.name }}</option>{% endfor %}</select>
+<select name="owner" onchange="this.form.submit()"><option value="0">Any owner</option>
+{% for p in people %}<option value="{{ p.id }}" {% if p.id==sel_o %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+<span class="sub2" style="align-self:center">{{ n }} commitment{{ '' if n==1 else 's' }}</span>
+</form>
+
+{% if not tl %}
+<div class="card"><p class="hint">Nothing to plot. Commit a dataroom to a date on
+<a href="/schedule">Schedule</a> and it will appear here.</p></div>
+{% else %}
+<div class="card">
+<div class="scroll">
+<table class="tl">
+<tr class="tl-axis"><th class="tl-lbl">Commitment</th><th class="tl-due">Due</th>
+<th class="tl-cell"><div class="tl-track tl-ruler">
+  {% for t in tl.ticks %}<i class="tl-tick" style="left:{{ t.at }}%"><b>{{ t.label }}</b></i>{% endfor %}
+  <i class="tl-now" style="left:{{ tl.today }}%"></i>
+</div></th></tr>
+
+{% for g in tl.groups %}
+<tr class="tl-grp"><td colspan="3">
+  <a href="/pursuit/{{ g.avl_id }}/{{ g.product_id }}"><b>{{ g.avl }}</b></a>
+  &mdash; {{ g.product }}</td></tr>
+{% for b in g.bars %}
+<tr>
+  <td class="tl-lbl">{{ b.c.kind }}{% if b.c.label %}<div class="sub2">{{ b.c.label }}</div>{% endif %}
+    <div class="sub2">{{ b.c.owner_name or b.c.owner or 'no owner' }}</div></td>
+  <td class="tl-due"><b>{{ b.c.due_date }}</b>
+    {% if b.r.days is not none %}<div>
+    {% if b.r.state == 'overdue' %}<span class="due due-over">{{ -b.r.days }}d late</span>
+    {% elif b.r.state == 'due-soon' %}<span class="due due-soon">{{ b.r.days }}d left</span>
+    {% else %}<span class="due">{{ b.r.days }}d</span>{% endif %}</div>{% endif %}
+    <div class="sub2"><span class="cs cs-{{ b.c.status }}">{{ b.c.status }}</span></div></td>
+  <td class="tl-cell"><div class="tl-track">
+    {% for t in tl.ticks %}<i class="tl-tick" style="left:{{ t.at }}%"></i>{% endfor %}
+    <i class="tl-now" style="left:{{ tl.today }}%"></i>
+    <span class="tl-bar b-{{ b.r.state if b.c.status == 'Planned' else b.c.status|lower }}"
+          style="left:{{ b.left }}%;width:{{ b.width }}%"
+          title="{{ b.c.kind }} &mdash; committed {{ b.c.created_at[:10] }}, due {{ b.c.due_date }}"></span>
+    {% if b.r.rd.req %}<span class="tl-note" style="left:{{ b.left }}%">{{ b.r.rd.done }}/{{ b.r.rd.req }} required</span>{% endif %}
+  </div></td>
+</tr>
+{% endfor %}{% endfor %}
+</table>
+</div>
+<p class="hint" style="margin-top:10px">{{ tl['from'] }} to {{ tl['to'] }}.
+Bar colour is the same reading as the list: <span class="tl-key b-planned"></span> planned,
+<span class="tl-key b-due-soon"></span> due within 14 days,
+<span class="tl-key b-overdue"></span> past its date,
+<span class="tl-key b-met"></span> met,
+<span class="tl-key b-missed"></span> missed.</p>
+</div>
+{% endif %}
+{% endblock %}

@@ -764,3 +764,24 @@ Maxwell. It really is just a rename: the name lives in one column and nothing
 copies it, so every listing, call, contact, action, commitment and package
 already points at the row by id and follows on its own. Duplicate names are
 refused case-insensitively, and the change is audited with both names.
+
+## v38 - Timeline view, editable commitments, findable one-off actions
+**Timeline** (`/schedule/timeline`): every commitment on one date axis, grouped
+by TPO and product, with a today line and month gridlines. A bar runs from the
+day the commitment was made to the day it falls due - the run-up, which is a
+real interval and the part still worth acting on. Bar colour repeats what the
+Due column already says in words, so nothing depends on telling shades apart.
+Plain HTML positioned by percentage: no chart library, and it prints.
+
+**Editing a commitment**: every row has Edit, which turns it into one form for
+the date, kind, label, owner, notes and status. Status now includes Cancelled
+and a way back to Planned, where before only Met and Missed were reachable.
+Meeting a dataroom submission still records the pursuit's submitted date;
+moving off Met clears met_at but leaves that date alone, because it records
+something that happened and un-ticking a box here did not un-happen it.
+
+**One-off actions** were always storable with no TPO and no product - both
+selects have always offered "- none -". They just could not be found again.
+There is now a **General (no TPO)** filter, and such an action is labelled
+General in the list rather than rendering as a blank cell that reads like
+missing data.

@@ -1,5 +1,7 @@
 {% extends "base.html" %}{% block body %}
+<div class="row" style="justify-content:space-between;align-items:baseline">
 <h2>Schedule</h2>
+<a class="btn small ghost" href="/schedule/timeline?show={{ show }}&amp;avl={{ sel_a }}&amp;owner={{ sel_o }}">Timeline view</a></div>
 <p class="hint">What we have committed to, and by when. A commitment belongs to a product &times; TPO
 &mdash; several can be in flight at once &mdash; and is shown against what is actually outstanding, so a
 date can be read alongside the work behind it rather than on its own.</p>
@@ -30,6 +32,25 @@ date can be read alongside the work behind it rather than on its own.</p>
 <th>Dataroom readiness</th><th>Owner</th><th>Status</th><th></th></tr>
 {% for r in rows %}
 {% set c = r.c %}
+{% if edit == c.id %}
+<tr class="editing"><form method="post" action="/schedule/{{ c.id }}/save">
+<input type="hidden" name="next_url" value="/schedule?show={{ show }}">
+<td class="nowrap"><input name="due_date" type="date" value="{{ c.due_date }}" required></td>
+<td></td>
+<td><b>{{ c.avl_name }}</b></td>
+<td>{{ c.product }}</td>
+<td><select name="kind">{% for k in kinds %}<option {% if c.kind==k %}selected{% endif %}>{{ k }}</option>{% endfor %}</select>
+<input name="label" value="{{ c.label }}" size="22" placeholder="Label">
+<input name="notes" value="{{ c.notes }}" size="22" placeholder="Notes"></td>
+<td class="hint">The TPO and product are fixed &mdash; delete and re-commit to move it.</td>
+<td><select name="owner_person_id"><option value="">- owner -</option>
+{% for p in people %}<option value="{{ p.id }}" {% if c.owner_person_id==p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+<input name="owner_other" value="{{ c.owner if not c.owner_person_id else '' }}" size="12" placeholder="or free text"></td>
+<td><select name="status">{% for st in statuses %}<option {% if c.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select></td>
+<td class="nowrap"><button>Save</button>
+<a class="btn small ghost" href="/schedule?show={{ show }}">Cancel</a></td>
+</form></tr>
+{% else %}
 <tr class="{{ 'overdue' if r.state=='overdue' }}">
 <td class="nowrap"><b>{{ c.due_date }}</b></td>
 <td class="nowrap">{% if r.days is not none %}
@@ -66,7 +87,10 @@ date can be read alongside the work behind it rather than on its own.</p>
       onsubmit="return confirm('Give every outstanding Required requirement a due date 7 days before {{ c.due_date }}? Requirements that already have a date are left alone.')">
 <input type="hidden" name="lead_days" value="7"><input type="hidden" name="next_url" value="/schedule?show={{ show }}">
 <button title="Work backwards: date the outstanding requirements from this commitment">Date work</button></form>
-{% endif %}</td></tr>
+{% endif %}
+<a class="btn small ghost" href="/schedule?show={{ show }}&amp;edit={{ c.id }}"
+   title="Change the date, kind, owner, notes or status">Edit</a></td></tr>
+{% endif %}
 {% else %}<tr><td colspan="9" class="hint">Nothing scheduled. Commit to a date below.</td></tr>{% endfor %}
 </table>
 

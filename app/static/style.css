@@ -213,3 +213,33 @@ dialog.pv::backdrop{background:rgba(0,0,0,.55)}
 
 .pv-note{font-size:12.5px;color:#444;background:#e8eef5;border-radius:3px;padding:2px 7px}
 .pv-status{color:#fff;margin:0;padding:22px;font-size:15px}
+
+/* Schedule timeline. Bars are positioned by percentage against one shared date
+   axis, so the whole thing is plain HTML - no chart library, and it prints. */
+table.tl{width:100%;border-collapse:collapse;min-width:900px}
+table.tl th{text-align:left;color:var(--navy);font-size:14px;padding:0 9px 6px}
+table.tl td{padding:5px 9px;border-bottom:1px solid #e6e6e6;vertical-align:top;font-size:14px}
+.tl-lbl{width:230px}.tl-due{width:104px;white-space:nowrap}
+.tl-cell{padding-left:0!important;padding-right:14px!important}
+.tl-grp td{background:#DCE6F1;color:var(--navy);font-weight:bold;font-size:14.5px;
+  border-bottom:1px solid #c3d3e8}
+.tl-grp a{color:var(--navy)}
+.tl-track{position:relative;height:26px;min-width:420px}
+.tl-ruler{height:22px}
+.tl-tick{position:absolute;top:0;bottom:0;border-left:1px solid #d9dee6}
+.tl-tick b{position:absolute;left:5px;top:3px;font-size:12px;font-weight:normal;
+  color:#444;white-space:nowrap}
+.tl-now{position:absolute;top:0;bottom:0;border-left:2px solid #b00020;z-index:2}
+.tl-bar{position:absolute;top:5px;height:16px;border-radius:8px;z-index:1;
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
+.tl-note{position:absolute;top:5px;font-size:12px;line-height:16px;color:#333;
+  white-space:nowrap;padding-left:6px;z-index:3;text-shadow:0 0 3px #fff,0 0 3px #fff}
+/* Same reading as the list: colour repeats what the Due column already says in
+   words, so nothing depends on telling these apart. */
+.b-planned{background:#2E5395}.b-due-soon{background:#E8A33D}
+.b-overdue{background:#b00020}.b-met{background:#2e7d32}
+.b-missed{background:#8a8a8a}.b-cancelled{background:#c9c9c9}
+.tl-key{display:inline-block;width:22px;height:10px;border-radius:5px;vertical-align:middle;
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
+tr.editing td{background:#f4f8ff}
+.chip.gen{background:#e3e8ef;color:#33404f}
