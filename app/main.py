@@ -619,16 +619,27 @@ def team(request: Request, user=Depends(require_user)):
         "FROM assignments a JOIN people p ON p.id=a.person_id "
         "LEFT JOIN avls av ON av.id=a.avl_id LEFT JOIN products pr ON pr.id=a.product_id "
         "WHERE a.ended_at IS NOT NULL ORDER BY a.ended_at DESC LIMIT 50").fetchall()
-    # coverage: per AVL, who fills each role
-    cov = {}
+    # Coverage is reported against the dimension each seat is actually held on:
+    # account seats per TPO, the technical seat per product. Every active AVL and
+    # product is listed whether or not anyone holds a seat on it, so a dash is a
+    # real gap rather than an artefact of nobody having been assigned yet.
+    cov_avl = {a["name"]: {} for a in avls}
+    cov_prod = {p["name"]: {} for p in products}
     for r in current:
-        if r["avl_name"]:
-            cov.setdefault(r["avl_name"], {}).setdefault(r["role"], []).append(r["person"])
+        scope = db.ROLE_SCOPE.get(r["role"], "avl")
+        if scope == "avl" and r["avl_name"]:
+            cov_avl.setdefault(r["avl_name"], {}).setdefault(r["role"], []).append(r["person"])
+        elif scope == "product" and r["product_name"]:
+            # A technical seat can be narrowed to one TPO as well. Say so, rather
+            # than let it read as cover for that product everywhere.
+            who = r["person"] + (f" ({r['avl_name']} only)" if r["avl_name"] else "")
+            cov_prod.setdefault(r["product_name"], {}).setdefault(r["role"], []).append(who)
     c.close()
     return templates.TemplateResponse(request, "team.html", {"user": user, "people": people,
         "active_people": active_people, "load": load,
         "avls": avls, "products": products, "current": current, "past": past,
-        "cov": cov, "roles": db.ROLES, "orgs": orgs})
+        "cov_avl": cov_avl, "cov_prod": cov_prod, "roles": db.ROLES,
+        "roles_avl": db.roles_for("avl"), "roles_prod": db.roles_for("product"), "orgs": orgs})
 
 def _org_value(org, org_other):
     """"Other" is a prompt to define the team, not a bucket to file people in."""

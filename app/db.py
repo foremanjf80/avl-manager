@@ -19,6 +19,17 @@ LOST_STATUSES = ("Delisted",)
 
 ROLES = ["Account Manager (Sales)", "Sr. Commercial Rep (Sales)", "Product/Technical Rep (CE)"]
 
+# Which dimension each seat is actually held against. The two sales seats belong
+# to a TPO account - they are a relationship with a financier. The technical seat
+# belongs to a product: it is product expertise, and the same person covers that
+# product wherever it is being listed. Reporting all three against one dimension
+# is what produced a Product/Technical Rep column that could never be filled.
+# An assignment may still name both, for a rep covering one product at one TPO.
+ROLE_SCOPE = {ROLES[0]: "avl", ROLES[1]: "avl", ROLES[2]: "product"}
+
+def roles_for(scope):
+    return [r for r in ROLES if ROLE_SCOPE.get(r, "avl") == scope]
+
 # Which side of the house someone sits on; drives who appears in each role picker.
 # Internal Qcells teams a person can sit in. Not a closed set: anything already
 # stored is offered alongside these, and "Other" is defined free-text.

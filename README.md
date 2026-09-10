@@ -809,3 +809,22 @@ Restore. A name taken while it was away gets a suffix rather than a collision.
 
 Also: **Add requirement** moved above the requirements table on the workstream
 template page, rather than below a list that can run to ninety-four rows.
+
+## v40 - Coverage is reported against the seat's own dimension
+"Coverage by TPO account" listed all three seats against TPOs, but only two of
+them are held that way. Every Product/Technical Rep assignment in the database
+is scoped to a product (10 of them) and none to an AVL, so that column was
+structurally always "-" - while the note underneath called those dashes "seats
+to fill". It was pointing at ten seats that were already filled somewhere the
+table could not show.
+
+ROLE_SCOPE now records which dimension each seat is held on: Account Manager and
+Sr. Commercial Rep against a TPO, Product/Technical Rep against a product,
+because it is product expertise and the same people cover that product wherever
+it is being listed. The page reports two tables accordingly.
+
+Both list every active TPO and product whether or not anyone holds a seat, so a
+dash is a real gap rather than an artefact of nobody having been assigned yet.
+An assignment naming a product *and* a TPO still works - that is a rep covering
+one product at one financier - and reads as "Lino Jang (EnFin only)" so it
+cannot be mistaken for cover everywhere.
