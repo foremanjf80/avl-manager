@@ -1,26 +1,28 @@
 {% extends "base.html" %}{% block body %}
 <h2>Key Account Team - Trifecta Assignments</h2>
-<p class="hint">This roster is the only place people are created. Everything that picks a name &mdash;
-the seats on <a href="/manage">Manage</a>, the assignments below &mdash; chooses from it, so names stay
-consistent and every change keeps a dated history.</p>
+<p class="hint">This roster is the only place people are created, and this page is the view
+<b>by person</b>: who exists, what each of them carries, and who covered what before.
+Seats themselves are set <b>in context on <a href="/manage">Manage</a></b> &mdash; Prod/Tech reps on the
+product, Account Manager and Sr. Commercial Rep on the TPO &mdash; which is also where you see coverage
+laid out by product and by account.</p>
 {% if request.query_params.get('err') == 'dupname' %}<p class="hint" style="color:#b00">Someone with that name already exists.</p>{% endif %}
 {% if request.query_params.get('renamed') %}<p class="hint" style="color:#2e7d32">Renamed.
 {{ request.query_params.get('renamed') }} record(s) that named them followed the change. Free-text
 notes are left as written.</p>{% endif %}
 {% if request.query_params.get('err') == 'inactive' %}<p class="hint" style="color:#b00">That person is retired &mdash; restore them before assigning.</p>{% endif %}
 <div class="cols">
-<div class="card"><h3>Assign someone</h3>
+<div class="card"><h3>Assign a specific scope</h3>
 <form method="post" action="/team/assign" class="row">
 <select name="person_id" required>{% for p in active_people %}<option value="{{ p.id }}">{{ p.name }}{% if p.org %} ({{ p.org }}){% endif %}</option>{% endfor %}</select>
 <select name="role" required>{% for r in roles %}<option>{{ r }}</option>{% endfor %}</select>
 <select name="avl_id"><option value="">- AVL (optional) -</option>{% for a in avls %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select>
 <select name="product_id"><option value="">- Product (optional) -</option>{% for p in products %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
 <button>Assign</button></form>
-<p class="hint">At least one scope is required, and which one depends on the seat:
-<b>Account Manager</b> and <b>Sr. Commercial Rep</b> are held against a <b>TPO AVL</b>;
-<b>Product/Technical Rep</b> against a <b>product</b>. Name both only for a rep covering one
-product at one TPO specifically &mdash; a seat scoped the other way will not appear in its
-coverage table.</p>
+<p class="hint">For the case <a href="/manage">Manage</a> cannot express: someone covering
+<b>one product at one TPO</b> &mdash; name both. For everything else use Manage, where the seat sits
+next to the thing it covers and replacing a holder ends the previous one cleanly.
+Account Manager and Sr. Commercial Rep are held against a TPO; Product/Technical Rep against a
+product.</p>
 <h3>Add a person</h3>
 <form method="post" action="/team/person/add" class="row">
 <input name="name" placeholder="Full name" required>
@@ -29,24 +31,6 @@ coverage table.</p>
 <input name="org_other" class="orgother" placeholder="Define the team" size="18" style="display:none">
 <button>Add</button></form>
 <p class="hint">Adding someone already retired brings them back rather than creating a duplicate.</p></div>
-
-<div class="card"><h3>Coverage by TPO account</h3>
-<table class="list"><tr><th>TPO AVL</th>{% for r in roles_avl %}<th>{{ r.split(' (')[0] }}</th>{% endfor %}</tr>
-{% for avl, m in cov_avl|dictsort %}<tr><td><b>{{ avl }}</b></td>
-{% for r in roles_avl %}<td>{{ m.get(r, [])|join(', ') or '-' }}</td>{% endfor %}</tr>
-{% else %}<tr><td colspan="{{ roles_avl|length + 1 }}" class="hint">No TPO AVLs yet.</td></tr>{% endfor %}</table>
-<p class="hint">The two account seats. They belong to the TPO relationship, so they are the same
-whichever product is in play. A "-" is a seat to fill.</p></div>
-
-<div class="card"><h3>Coverage by product</h3>
-<table class="list"><tr><th>Product</th>{% for r in roles_prod %}<th>{{ r.split(' (')[0] }}</th>{% endfor %}</tr>
-{% for prod, m in cov_prod|dictsort %}<tr><td><b>{{ prod }}</b></td>
-{% for r in roles_prod %}<td>{{ m.get(r, [])|join(', ') or '-' }}</td>{% endfor %}</tr>
-{% else %}<tr><td colspan="{{ roles_prod|length + 1 }}" class="hint">No products yet.</td></tr>{% endfor %}</table>
-<p class="hint">The technical seat is held per <b>product</b>, not per TPO &mdash; it is product
-expertise, so the same people cover that product at every AVL. Someone assigned to a product
-<em>and</em> a TPO shows as "name (TPO only)".</p></div>
-</div>
 
 <div class="card"><h3>Roster</h3>
 <table class="list"><tr><th>Name</th><th>Email</th><th>Org</th><th>Live seats</th><th></th><th></th></tr>
@@ -82,12 +66,21 @@ document.querySelectorAll('.orgpick').forEach(sel => {
 });
 </script>
 
-<div class="card"><h3>Current assignments</h3>
-<table class="list"><tr><th>Person</th><th>Role</th><th>TPO AVL</th><th>Product line</th><th>Since</th><th></th></tr>
-{% for r in current %}<tr><td><b>{{ r.person }}</b></td><td>{{ r.role }}</td>
-<td>{{ r.avl_name or 'All' }}</td><td>{{ r.product_name or 'All' }}</td><td class="sub2">{{ r.started_at[:10] }}</td>
-<td><form method="post" action="/team/assign/{{ r.id }}/end" class="inline"><button>Remove</button></form></td></tr>
-{% endfor %}</table></div>
+<div class="card"><h3>What each person carries</h3>
+<table class="list"><tr><th>Person</th><th>Seat</th><th>Covering</th><th>Since</th><th></th></tr>
+{% for r in current %}<tr>
+<td>{% if loop.first or r.person != loop.previtem.person %}<b>{{ r.person }}</b>{% endif %}</td>
+<td>{{ r.role.split(' (')[0] }}</td>
+<td>{% if r.product_name and r.avl_name %}{{ r.product_name }} <span class="chip">at {{ r.avl_name }}</span>
+{% elif r.product_name %}{{ r.product_name }}
+{% elif r.avl_name %}{{ r.avl_name }}
+{% else %}<span class="hint">everything</span>{% endif %}</td>
+<td class="sub2">{{ r.started_at[:10] }}</td>
+<td><form method="post" action="/team/assign/{{ r.id }}/end" class="inline"
+  onsubmit="return confirm('End this assignment? It stays in the history below.')"><button>End</button></form></td></tr>
+{% else %}<tr><td colspan="5" class="hint">Nobody holds a seat yet. Set them on <a href="/manage">Manage</a>.</td></tr>{% endfor %}</table>
+{% if n_unseated %}<p class="hint">{{ n_unseated }} TPO AVL{{ '' if n_unseated == 1 else 's' }} have
+no account seat filled &mdash; <a href="/manage">Manage</a> lists them with the seat vacant.</p>{% endif %}</div>
 
 {% if past %}<div class="card"><h3>Past assignments (history)</h3>
 <table class="list"><tr><th>Person</th><th>Role</th><th>TPO AVL</th><th>Product line</th><th>From</th><th>To</th></tr>

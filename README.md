@@ -828,3 +828,20 @@ dash is a real gap rather than an artefact of nobody having been assigned yet.
 An assignment naming a product *and* a TPO still works - that is a rep covering
 one product at one financier - and reads as "Lino Jang (EnFin only)" so it
 cannot be mistaken for cover everywhere.
+
+## v41 - Team is the view by person; Manage owns the seats
+Team and Manage were showing the same thing twice. Manage lists every product
+with its Prod/Tech reps and every AVL with its Account Manager and Sr.
+Commercial Rep, and lets you change them in place. Team repeated both as
+read-only grids and offered a generic assign form beside them - the same data,
+in the worse place, since Manage puts the seat next to the thing it covers.
+
+The coverage grids are gone from Team. It now answers the question Manage
+cannot: **what does one person carry**. "What each person carries" groups live
+seats by person and says what each one covers - a product, a TPO, or a product
+at one TPO - with the dated history underneath.
+
+The assign form stays, retitled "Assign a specific scope", for the one case
+Manage has no room for: somebody covering one product at one financier. Normal
+seats go through Manage, where replacing a holder also ends the previous one
+cleanly - Team's form only ever appended a row.
