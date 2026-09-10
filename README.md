@@ -845,3 +845,19 @@ The assign form stays, retitled "Assign a specific scope", for the one case
 Manage has no room for: somebody covering one product at one financier. Normal
 seats go through Manage, where replacing a holder also ends the previous one
 cleanly - Team's form only ever appended a row.
+
+## v42 - A new AVL no longer reads as "Listed" for everything
+Adding an AVL creates no listing rows, which is right: nobody has said anything
+about those products at that TPO yet. But the matrix cell only marked an option
+`selected` when a row existed, and with nothing selected a browser shows the
+first option in the list - which is "Listed". So a brand-new TPO displayed the
+word Listed against every Qcells product while being coloured as No Info.
+
+Nothing in the database was ever wrong, and no count was ever affected: the
+listed totals read real rows, and there were none. It was the screen making a
+claim the data did not.
+
+The absent case is now named rather than implied - one `cur` value drives both
+the cell colour and the selected option. The CSV and PPTX exports say No Info
+too, instead of leaving the column blank, since blank in a spreadsheet reads as
+missing data when it is actually an answer.

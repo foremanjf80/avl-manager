@@ -779,7 +779,9 @@ def export_matrix(request: Request, user=Depends(require_user)):
         row = [p["category"], p["name"], p["lifecycle"], p["launch_status"]]
         for a in avls:
             cell = grid.get((p["id"], a["id"]))
-            row.append(cell["status"] if cell else "")
+            # Say No Info rather than leave it blank: a blank column reads as
+            # missing data in a spreadsheet, when it is a real answer.
+            row.append(cell["status"] if cell else "No Info")
         rows.append(row)
     c.close()
     return _csv_response(rows, ["Category", "Product", "Lifecycle", "Launch"] + [a["name"] for a in avls],
@@ -1074,7 +1076,7 @@ def _pptx_status_deck():
         label = p["name"] + (f" [{p['lifecycle']} {p['launch_status']}]" if p["lifecycle"] != "Active" else "")
         cell(i, 0, label, bold=True, size=8)
         for j, a in enumerate(avls, 1):
-            st = grid.get((p["id"], a["id"]), "")
+            st = grid.get((p["id"], a["id"]), "No Info")
             cell(i, j, st, fill=FILLS.get(st), size=8)
     buf = io.BytesIO(); pres.save(buf); buf.seek(0)
     return buf
