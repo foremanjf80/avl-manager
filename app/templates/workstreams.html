@@ -8,13 +8,34 @@ product &times; TPO checklist.</p>
 {% if request.query_params.get('undone') %}<p class="hint" style="color:#2e7d32">Rolled back "{{ request.query_params.get('undone') }}". The rollback itself is in the list below if you need to reverse it.</p>{% endif %}
 
 <div class="cols">
+{% if request.query_params.get('err') == 'inuse' %}<p class="hint" style="color:#b00">
+Not deleted &mdash; {{ request.query_params.get('n') }} checklist(s) were seeded from this template.
+Deleting it would leave those requirements unable to report drift against it.
+<b>Retire</b> it instead: it stops being offered, and stays as the record of why those requirements exist.</p>{% endif %}
+{% if request.query_params.get('deleted') %}<p class="hint" style="color:#2e7d32">Deleted. It can be put back from <b>Recently deleted</b> below.</p>{% endif %}
+{% if request.query_params.get('restored') %}<p class="hint" style="color:#2e7d32">Restored.</p>{% endif %}
+{% if request.query_params.get('err') == 'gone' %}<p class="hint" style="color:#b00">That entry is no longer there.</p>{% endif %}
+
 <div class="card"><h3>Library</h3>
 <table class="list"><tr><th>Template</th><th>Product type</th><th>AVL</th><th>Items</th><th></th></tr>
 {% for t in tmpls %}<tr class="{{ 'inactive' if not t.active }}{{ ' sel' if cur and t.id==cur.id }}">
 <td><a href="/workstreams?t={{ t.id }}"><b>{{ t.name }}</b></a></td>
 <td>{{ t.category or 'Any' }}</td><td>{{ t.avl_name or 'All' }}</td><td>{{ t.n_items }}</td>
-<td><form method="post" action="/workstreams/{{ t.id }}/toggle" class="inline"><button>{{ 'Retire' if t.active else 'Restore' }}</button></form></td>
+<td class="nowrap"><form method="post" action="/workstreams/{{ t.id }}/toggle" class="inline"><button>{{ 'Retire' if t.active else 'Restore' }}</button></form>
+{% if user and user.get('role') == 'admin' %}<form method="post" action="/workstreams/{{ t.id }}/delete" class="inline"
+   onsubmit="return confirm('Delete &quot;{{ t.name }}&quot; and its requirements? It can be restored from Recently deleted.')"><button class="chipx" title="Delete">&times;</button></form>{% endif %}</td>
 </tr>{% endfor %}</table>
+
+{% if deleted %}
+<h4>Recently deleted</h4>
+<table class="list"><tr><th>Template</th><th>Deleted</th><th>By</th><th></th></tr>
+{% for d in deleted %}<tr><td><b>{{ d.name }}</b></td><td class="sub2">{{ d.deleted_at[:16] }}</td>
+<td class="sub2">{{ d.deleted_by }}</td>
+<td><form method="post" action="/workstreams/restore/{{ d.id }}" class="inline"><button>Restore</button></form></td>
+</tr>{% endfor %}</table>
+<p class="hint">The last {{ deleted|length }} deleted template(s), kept so a delete is as reversible as
+every other change on this page.</p>
+{% endif %}
 
 <h3>New template</h3>
 <form method="post" action="/workstreams/add" class="row">
@@ -44,6 +65,14 @@ create it scoped to that AVL, then add the extras below.</p></div>
 <button>Save scope</button></form>
 {% if cur.source_url %}<p class="hint">Source: <a href="{{ cur.source_url }}" target="_blank" rel="noopener">{{ cur.source_url }}</a></p>{% endif %}
 
+<h4>Add requirement</h4>
+<form method="post" action="/workstreams/{{ cur.id }}/items/add" class="row">
+<input name="doc_category" placeholder="Document category" size="20" list="dcats">
+<input name="workstream" placeholder="Required document" size="40" required>
+<select name="obligation">{% for ob in obligations %}<option>{{ ob }}</option>{% endfor %}</select>
+<input name="description" placeholder="Notes" size="26">
+<button>Add</button></form>
+
 <table class="list"><tr><th>#</th><th>Document category</th><th>Required document</th><th>Obligation</th><th>Notes</th><th></th><th></th></tr>
 {% for i in items %}<tr>{% if loop.changed(i.doc_category) %}{% endif %}
 <form method="post" action="/workstreams/items/{{ i.id }}/save">
@@ -55,16 +84,9 @@ create it scoped to that AVL, then add the extras below.</p></div>
 <td><button>Save</button></td></form>
 <td><form method="post" action="/workstreams/items/{{ i.id }}/delete" class="inline"
       onsubmit="return confirm('Remove this requirement from the template?')"><button>&times;</button></form></td>
-</tr>{% else %}<tr><td colspan="7" class="hint">No requirements yet &mdash; add the first one below.</td></tr>{% endfor %}</table>
+</tr>{% else %}<tr><td colspan="7" class="hint">No requirements yet &mdash; add the first one above.</td></tr>{% endfor %}</table>
 <datalist id="dcats">{% for dc in doc_cats %}<option value="{{ dc }}">{% endfor %}</datalist>
 
-<h4>Add requirement</h4>
-<form method="post" action="/workstreams/{{ cur.id }}/items/add" class="row">
-<input name="doc_category" placeholder="Document category" size="20" list="dcats">
-<input name="workstream" placeholder="Required document" size="40" required>
-<select name="obligation">{% for ob in obligations %}<option>{{ ob }}</option>{% endfor %}</select>
-<input name="description" placeholder="Notes" size="26">
-<button>Add</button></form>
 
 <h4>Recent changes &mdash; undo</h4>
 <table class="list"><tr><th>When</th><th>Change</th><th>By</th><th></th></tr>

@@ -1391,9 +1391,12 @@ def workstreams(request: Request, t: int = 0, user=Depends(require_user)):
                       "FROM checklist_items ci JOIN products p ON p.id=ci.product_id "
                       "JOIN avls a ON a.id=ci.avl_id WHERE ci.template_id=? "
                       "GROUP BY ci.product_id, ci.avl_id ORDER BY p.name", (sel,)).fetchall() if cur else []
+    deleted = c.execute("SELECT * FROM deleted_templates WHERE kind='workstream' "
+                        "ORDER BY id DESC").fetchall()
     c.close()
     return templates.TemplateResponse(request, "workstreams.html", {"user": user, "tmpls": tmpls,
         "cur": cur, "items": items, "avls": avls, "categories": db.CATEGORIES, "usage": usage,
+        "deleted": deleted,
         "obligations": db.OBLIGATIONS, "doc_cats": doc_cats, "history": history})
 
 @app.post("/workstreams/add")
@@ -1457,13 +1460,41 @@ def ws_template_toggle(tid: int, request: Request, user=Depends(require_editor))
 
 @app.post("/workstreams/{tid}/delete")
 def ws_template_delete(tid: int, request: Request, user=Depends(require_admin)):
+    """Delete is for mistakes. Retire is for templates that did their job.
+
+    checklist_items.template_id carries no foreign key, so deleting a template
+    something was seeded from leaves those rows pointing at nothing - and drift
+    reporting, which reads that link, then finds no template and quietly reports
+    no drift. A silent wrong answer on a submission is worse than a refusal.
+    """
     c = db.conn()
     row = c.execute("SELECT name FROM workstream_templates WHERE id=?", (tid,)).fetchone()
+    if not row:
+        c.close()
+        return RedirectResponse("/workstreams", status_code=303)
+    used = c.execute("SELECT COUNT(*) n FROM (SELECT 1 FROM checklist_items WHERE template_id=? "
+                     "GROUP BY product_id, avl_id)", (tid,)).fetchone()["n"]
+    if used:
+        c.close()
+        return RedirectResponse(f"/workstreams?t={tid}&err=inuse&n={used}", status_code=303)
+    db.stash_deleted_template(c, "workstream", row["name"],
+                              db.template_snapshot(c, tid), user["email"])
     c.execute("DELETE FROM workstream_templates WHERE id=?", (tid,))
     c.commit(); c.close()
-    if row:
-        db.log(user["email"], "workstream:template:delete", row["name"])
-    return RedirectResponse("/workstreams", status_code=303)
+    db.log(user["email"], "workstream:template:delete", row["name"])
+    return RedirectResponse("/workstreams?deleted=1", status_code=303)
+
+@app.post("/workstreams/restore/{del_id}")
+def ws_template_restore(del_id: int, request: Request, user=Depends(require_editor)):
+    c = db.conn()
+    res = db.restore_deleted_template(c, del_id, user["email"])
+    if not res:
+        c.close()
+        return RedirectResponse("/workstreams?err=gone", status_code=303)
+    _, tid, name = res
+    c.commit(); c.close()
+    db.log(user["email"], "workstream:template:restore", name)
+    return RedirectResponse(f"/workstreams?t={tid}&restored=1", status_code=303)
 
 @app.post("/workstreams/undo/{rev_id}")
 def ws_undo(rev_id: int, request: Request, user=Depends(require_editor)):
@@ -2848,9 +2879,11 @@ def ie_templates(request: Request, t: int = 0, user=Depends(require_user)):
     usage = c.execute("SELECT r.id, r.name, p.name AS product FROM ie_reports r "
                       "JOIN products p ON p.id=r.product_id WHERE r.template_id=? AND r.active=1",
                       (sel,)).fetchall() if cur else []
+    deleted = c.execute("SELECT * FROM deleted_templates WHERE kind='ie' "
+                        "ORDER BY id DESC").fetchall()
     c.close()
     return templates.TemplateResponse(request, "ie_templates.html", {"user": user, "tmpls": tmpls,
-        "cur": cur, "sections": sections, "history": history, "usage": usage,
+        "cur": cur, "sections": sections, "history": history, "usage": usage, "deleted": deleted,
         "categories": db.CATEGORIES, "reviewers": db.IE_REVIEWERS, "priorities": db.IE_PRIORITIES})
 
 @app.post("/ie/templates/add")
@@ -2963,6 +2996,43 @@ def ie_tmpl_toggle(tid: int, request: Request, user=Depends(require_editor)):
     c.execute("UPDATE ie_templates SET active = 1 - active WHERE id=?", (tid,))
     c.commit(); c.close()
     return RedirectResponse(f"/ie/templates?t={tid}", status_code=303)
+
+@app.post("/ie/templates/{tid}/delete")
+def ie_tmpl_delete(tid: int, request: Request, user=Depends(require_admin)):
+    """Refused once a review has been built from it.
+
+    ie_reports.template_id is ON DELETE SET NULL, so the review itself survives -
+    but the link to the reviewer's workbook goes with it, and that workbook is
+    what the filled data request is generated from. The review would quietly lose
+    the ability to produce its own deliverable.
+    """
+    c = db.conn()
+    row = c.execute("SELECT name FROM ie_templates WHERE id=?", (tid,)).fetchone()
+    if not row:
+        c.close()
+        return RedirectResponse("/ie/templates", status_code=303)
+    used = c.execute("SELECT COUNT(*) n FROM ie_reports WHERE template_id=?", (tid,)).fetchone()["n"]
+    if used:
+        c.close()
+        return RedirectResponse(f"/ie/templates?t={tid}&err=inuse&n={used}", status_code=303)
+    db.stash_deleted_template(c, "ie", row["name"],
+                              db.ie_template_snapshot(c, tid), user["email"])
+    c.execute("DELETE FROM ie_templates WHERE id=?", (tid,))
+    c.commit(); c.close()
+    db.log(user["email"], "ie:template:delete", row["name"])
+    return RedirectResponse("/ie/templates?deleted=1", status_code=303)
+
+@app.post("/ie/templates/restore/{del_id}")
+def ie_tmpl_restore(del_id: int, request: Request, user=Depends(require_editor)):
+    c = db.conn()
+    res = db.restore_deleted_template(c, del_id, user["email"])
+    if not res:
+        c.close()
+        return RedirectResponse("/ie/templates?err=gone", status_code=303)
+    _, tid, name = res
+    c.commit(); c.close()
+    db.log(user["email"], "ie:template:restore", name)
+    return RedirectResponse(f"/ie/templates?t={tid}&restored=1", status_code=303)
 
 @app.post("/ie/templates/{tid}/section/add")
 def ie_sec_add(tid: int, request: Request, title: str = Form(...), code: str = Form(""),

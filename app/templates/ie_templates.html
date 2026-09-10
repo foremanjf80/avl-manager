@@ -4,6 +4,12 @@
 <a href="/workstreams">workstream templates</a> by design. Starting a review on
 <a href="/ie">IE / DNV</a> copies a template into that report, so later template edits do not disturb
 reviews already under way.</p>
+{% if request.query_params.get('err') == 'inuse' %}<p class="hint" style="color:#b00">
+Not deleted &mdash; {{ request.query_params.get('n') }} review(s) were built from this template. The
+reviews would survive, but they would lose the link to the reviewer's workbook, which is what their
+filled data request is generated from. <b>Retire</b> it instead.</p>{% endif %}
+{% if request.query_params.get('deleted') %}<p class="hint" style="color:#2e7d32">Deleted. It can be put back from <b>Recently deleted</b> below.</p>{% endif %}
+{% if request.query_params.get('restored') %}<p class="hint" style="color:#2e7d32">Restored, workbook and all.</p>{% endif %}
 {% if request.query_params.get('err') == 'dup' %}<p class="hint" style="color:#b00">A template with that name already exists.</p>{% endif %}
 {% if request.query_params.get('err') == 'gone' %}<p class="hint" style="color:#b00">That restore point no longer exists.</p>{% endif %}
 {% if request.query_params.get('err') == 'notxlsx' %}<p class="hint" style="color:#b00">That needs to be an .xlsx or .xlsm workbook.</p>{% endif %}
@@ -17,8 +23,19 @@ reviews already under way.</p>
 {% for t in tmpls %}<tr class="{{ 'inactive' if not t.active }}{{ ' sel' if cur and t.id==cur.id }}">
 <td><a href="/ie/templates?t={{ t.id }}"><b>{{ t.name }}</b></a></td>
 <td>{{ t.reviewer }}</td><td>{{ t.category or 'Any' }}</td><td>{{ t.n_sec }}</td><td>{{ t.n_items }}</td>
-<td><form method="post" action="/ie/templates/{{ t.id }}/toggle" class="inline"><button>{{ 'Retire' if t.active else 'Restore' }}</button></form></td>
+<td class="nowrap"><form method="post" action="/ie/templates/{{ t.id }}/toggle" class="inline"><button>{{ 'Retire' if t.active else 'Restore' }}</button></form>
+{% if user and user.get('role') == 'admin' %}<form method="post" action="/ie/templates/{{ t.id }}/delete" class="inline"
+   onsubmit="return confirm('Delete &quot;{{ t.name }}&quot; and its sections? It can be restored from Recently deleted.')"><button class="chipx" title="Delete">&times;</button></form>{% endif %}</td>
 </tr>{% endfor %}</table>
+{% if deleted %}
+<h4>Recently deleted</h4>
+<table class="list"><tr><th>Template</th><th>Deleted</th><th>By</th><th></th></tr>
+{% for d in deleted %}<tr><td><b>{{ d.name }}</b></td><td class="sub2">{{ d.deleted_at[:16] }}</td>
+<td class="sub2">{{ d.deleted_by }}</td>
+<td><form method="post" action="/ie/templates/restore/{{ d.id }}" class="inline"><button>Restore</button></form></td>
+</tr>{% endfor %}</table>
+{% endif %}
+
 <h3>New template</h3>
 <form method="post" action="/ie/templates/add" class="row">
 <input name="name" placeholder="Template name" required>

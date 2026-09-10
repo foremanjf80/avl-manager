@@ -541,6 +541,14 @@ CREATE TABLE IF NOT EXISTS call_attendees(
   contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
   name TEXT NOT NULL);                -- kept so history survives a delete
 CREATE INDEX IF NOT EXISTS ix_call_att ON call_attendees(call_id, side);
+CREATE TABLE IF NOT EXISTS deleted_templates(
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,                  -- 'workstream' or 'ie'
+  name TEXT NOT NULL,
+  snapshot TEXT NOT NULL,              -- JSON of the whole template as deleted
+  deleted_by TEXT, deleted_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_deltmpl ON deleted_templates(kind, id DESC);
+
 CREATE TABLE IF NOT EXISTS template_revisions(
   id INTEGER PRIMARY KEY,
   template_id INTEGER NOT NULL REFERENCES workstream_templates(id) ON DELETE CASCADE,
@@ -882,6 +890,95 @@ def template_snapshot(c, template_id):
                       "FROM workstream_template_items WHERE template_id=? ORDER BY sort_order, id",
                       (template_id,)).fetchall()
     return json.dumps({"template": dict(t), "items": [dict(i) for i in items]})
+
+DELETED_TEMPLATE_LIMIT = 15
+
+def ie_template_snapshot(c, template_id):
+    """The IE template, its sections and their items, as one JSON blob."""
+    import json
+    t = c.execute("SELECT name, reviewer, category, notes, source_url, source_path, active "
+                  "FROM ie_templates WHERE id=?", (template_id,)).fetchone()
+    if not t:
+        return None
+    secs = []
+    for sec in c.execute("SELECT * FROM ie_template_sections WHERE template_id=? "
+                         "ORDER BY sort_order, id", (template_id,)):
+        items = c.execute("SELECT item_id, sub_section, review_item, evidence, suggested_owner, "
+                          "priority, source, sort_order FROM ie_template_items "
+                          "WHERE section_id=? ORDER BY sort_order, id", (sec["id"],)).fetchall()
+        secs.append({"code": sec["code"], "title": sec["title"], "owner": sec["owner"],
+                     "sort_order": sec["sort_order"], "items": [dict(i) for i in items]})
+    return json.dumps({"template": dict(t), "sections": secs})
+
+def stash_deleted_template(c, kind, name, snapshot, actor):
+    """Keep a deleted template recoverable.
+
+    Every other destructive edit on these pages has an Undo, and its history
+    lives in template_revisions - which cascades away with the template itself,
+    so a delete would otherwise be the one change that cannot be walked back.
+    This table sits outside that cascade on purpose.
+    """
+    if not snapshot:
+        return
+    c.execute("INSERT INTO deleted_templates(kind, name, snapshot, deleted_by, deleted_at) "
+              "VALUES(?,?,?,?,?)", (kind, name, snapshot, actor,
+                                    datetime.datetime.now().isoformat(timespec="seconds")))
+    c.execute("DELETE FROM deleted_templates WHERE kind=? AND id NOT IN "
+              "(SELECT id FROM deleted_templates WHERE kind=? ORDER BY id DESC LIMIT ?)",
+              (kind, kind, DELETED_TEMPLATE_LIMIT))
+
+def _free_name(c, table, name):
+    """The name back, or the name plus a suffix if something took it meanwhile."""
+    if not c.execute(f"SELECT 1 FROM {table} WHERE lower(name)=lower(?)", (name,)).fetchone():
+        return name
+    for n in range(2, 60):
+        alt = f"{name} ({n})"
+        if not c.execute(f"SELECT 1 FROM {table} WHERE lower(name)=lower(?)", (alt,)).fetchone():
+            return alt
+    return f"{name} ({datetime.datetime.now().strftime('%Y%m%d%H%M%S')})"
+
+def restore_deleted_template(c, del_id, actor):
+    """Put a deleted template back. Returns (kind, new_id, name) or None."""
+    import json
+    row = c.execute("SELECT * FROM deleted_templates WHERE id=?", (del_id,)).fetchone()
+    if not row:
+        return None
+    data = json.loads(row["snapshot"])
+    t = data["template"]
+    if row["kind"] == "workstream":
+        name = _free_name(c, "workstream_templates", t["name"])
+        c.execute("INSERT INTO workstream_templates(name, category, avl_id, notes, source_url, "
+                  "active, created_by, created_at) VALUES(?,?,?,?,?,?,?,?)",
+                  (name, t["category"], t["avl_id"], t["notes"], t.get("source_url", ""),
+                   t.get("active", 1), actor,
+                   datetime.datetime.now().isoformat(timespec="seconds")))
+        tid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        for i in data["items"]:
+            c.execute("INSERT INTO workstream_template_items(template_id, doc_category, workstream, "
+                      "obligation, description, sort_order) VALUES(?,?,?,?,?,?)",
+                      (tid, i["doc_category"], i["workstream"], i["obligation"],
+                       i["description"], i["sort_order"]))
+    else:
+        name = _free_name(c, "ie_templates", t["name"])
+        c.execute("INSERT INTO ie_templates(name, reviewer, category, notes, source_url, "
+                  "source_path, active, created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                  (name, t["reviewer"], t["category"], t["notes"], t.get("source_url", ""),
+                   t.get("source_path", ""), t.get("active", 1), actor,
+                   datetime.datetime.now().isoformat(timespec="seconds")))
+        tid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+        for sec in data["sections"]:
+            c.execute("INSERT INTO ie_template_sections(template_id, code, title, owner, sort_order) "
+                      "VALUES(?,?,?,?,?)",
+                      (tid, sec["code"], sec["title"], sec["owner"], sec["sort_order"]))
+            sid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+            for i in sec["items"]:
+                c.execute("INSERT INTO ie_template_items(section_id, item_id, sub_section, "
+                          "review_item, evidence, suggested_owner, priority, source, sort_order) "
+                          "VALUES(?,?,?,?,?,?,?,?,?)",
+                          (sid, i["item_id"], i["sub_section"], i["review_item"], i["evidence"],
+                           i["suggested_owner"], i["priority"], i["source"], i["sort_order"]))
+    c.execute("DELETE FROM deleted_templates WHERE id=?", (del_id,))
+    return row["kind"], tid, name
 
 def record_revision(c, template_id, action, detail, actor):
     """Snapshot the pre-change state. Call before mutating."""

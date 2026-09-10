@@ -785,3 +785,27 @@ selects have always offered "- none -". They just could not be found again.
 There is now a **General (no TPO)** filter, and such an action is labelled
 General in the list rather than rendering as a blank cell that reads like
 missing data.
+
+## v39 - Deleting a template, safely and reversibly
+Delete already existed for workstream templates, admin-only and buried at the
+foot of the selected template's panel. It had no guard and no undo. IE templates
+had no delete at all.
+
+**Guarded.** A workstream template a checklist was seeded from cannot be
+deleted: checklist_items.template_id carries no foreign key, so those rows would
+point at nothing, and drift reporting - which reads that link - would find no
+template and quietly report no drift. A silent wrong answer on a submission is
+worse than a refusal. An IE template a review was built from is refused for the
+same reason: ie_reports.template_id is ON DELETE SET NULL, so the review
+survives but loses the link to the reviewer's workbook, which is what its filled
+data request is generated from. Both say so, and point at Retire.
+
+**Reversible.** Deleting stashes the whole template - items, or sections and
+their items - in deleted_templates, which sits outside the cascade that takes
+template_revisions with it. Recently deleted lists the last 15 per kind with a
+Restore. A name taken while it was away gets a suffix rather than a collision.
+
+**Findable.** Delete is now beside Retire in the library list on both pages.
+
+Also: **Add requirement** moved above the requirements table on the workstream
+template page, rather than below a list that can run to ninety-four rows.
