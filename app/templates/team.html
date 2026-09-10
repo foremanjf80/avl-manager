@@ -4,6 +4,9 @@
 the seats on <a href="/manage">Manage</a>, the assignments below &mdash; chooses from it, so names stay
 consistent and every change keeps a dated history.</p>
 {% if request.query_params.get('err') == 'dupname' %}<p class="hint" style="color:#b00">Someone with that name already exists.</p>{% endif %}
+{% if request.query_params.get('renamed') %}<p class="hint" style="color:#2e7d32">Renamed.
+{{ request.query_params.get('renamed') }} record(s) that named them followed the change. Free-text
+notes are left as written.</p>{% endif %}
 {% if request.query_params.get('err') == 'inactive' %}<p class="hint" style="color:#b00">That person is retired &mdash; restore them before assigning.</p>{% endif %}
 <div class="cols">
 <div class="card"><h3>Assign someone</h3>

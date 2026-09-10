@@ -1,5 +1,5 @@
 """SQLite data layer for the Qcells AVL Manager."""
-import sqlite3, os, datetime
+import sqlite3, os, datetime, re
 
 DB_PATH = os.environ.get("AVL_DB", os.path.join(os.path.dirname(__file__), "..", "avl.db"))
 
@@ -650,6 +650,38 @@ def refresh_rep_cache(c, avl_id=None, product_id=None):
         c.execute("UPDATE products SET tech_reps=? WHERE id=?",
                   (", ".join(r["name"] for r in role_holders(c, PT, product_id=product_id)),
                    product_id))
+
+_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+def rename_person_cascade(c, person_id, new_name):
+    """Carry a rename through every stored copy of a person's name.
+
+    Rows that point at somebody keep a copy of their name beside the id, so the
+    row still reads correctly once the link is gone - a retired owner, a deleted
+    person. That copy goes stale the moment the person is renamed.
+
+    The pairs are found from the schema rather than kept in a list somebody has
+    to remember to extend, so a table added later is covered the day it exists.
+
+    Free text is deliberately left alone. A label like
+    "Sarah O. / Legal / RBO / MKTG" is a note about which teams owe something,
+    not a link to a person, and rewriting names inside prose is how prose gets
+    corrupted.
+    """
+    done = 0
+    for (t,) in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
+        if not _IDENT.match(t):
+            continue
+        cols = [r[1] for r in c.execute(f"PRAGMA table_info({t})")]
+        for col in cols:
+            if not col.endswith("_person_id") or not _IDENT.match(col):
+                continue
+            mate = (col[: -len("_person_id")] or "owner").rstrip("_") or "owner"
+            if mate not in cols:
+                continue
+            done += c.execute(f"UPDATE {t} SET {mate}=? WHERE {col}=? AND {mate}<>?",
+                              (new_name, person_id, new_name)).rowcount
+    return done
 
 def refresh_all_rep_caches(c):
     for r in c.execute("SELECT id FROM avls").fetchall():

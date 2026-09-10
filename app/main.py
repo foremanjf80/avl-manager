@@ -646,12 +646,15 @@ def save_person(person_id: int, request: Request, name: str = Form(...), email: 
     if c.execute("SELECT 1 FROM people WHERE lower(name)=lower(?) AND id<>?", (nm, person_id)).fetchone():
         c.close()
         return RedirectResponse("/team?err=dupname", status_code=303)
+    was = c.execute("SELECT name FROM people WHERE id=?", (person_id,)).fetchone()
     c.execute("UPDATE people SET name=?, email=?, org=? WHERE id=?",
               (nm, email.strip(), org.strip(), person_id))
+    moved = db.rename_person_cascade(c, person_id, nm) if was and was["name"] != nm else 0
     db.refresh_all_rep_caches(c)
     c.commit(); c.close()
-    db.log(user["email"], "person:save", nm)
-    return RedirectResponse("/team", status_code=303)
+    db.log(user["email"], "person:save",
+           f"{was['name']} renamed to {nm}, {moved} row(s) followed" if moved else nm)
+    return RedirectResponse(f"/team?renamed={moved}" if moved else "/team", status_code=303)
 
 @app.post("/team/person/{person_id}/toggle")
 def toggle_person(person_id: int, request: Request, user=Depends(require_editor)):

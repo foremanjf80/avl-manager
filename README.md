@@ -732,3 +732,20 @@ regardless, so opening the page can never silently drop a deliberate assignment.
 
 Existing rows migrate: an item's owner text moves to source_team wherever no
 person had actually been picked. Where someone had chosen a person, that stands.
+
+## v36 - Renaming somebody follows them everywhere
+Rows that point at a person keep a copy of their name beside the id, so the row
+still reads correctly once the link is gone - a retired owner, a deleted person.
+That copy went stale the moment somebody was renamed: the roster said one thing
+and every action, listing and IE item said another.
+
+Saving a changed name on the Team page now carries it through every one of those
+pairs, and says how many rows followed. The pairs are found from the schema
+rather than kept in a list somebody has to remember to extend, so a table added
+later is covered the day it exists - and the trifecta caches still rebuild as
+they always did.
+
+Free text is deliberately left alone. A label like "Sarah O. / Legal / RBO /
+MKTG" is a note about which teams owe something, not a link to a person, and
+rewriting names inside prose is how prose gets corrupted. Those are edited by
+hand, if they are worth editing at all.
