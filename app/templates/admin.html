@@ -11,7 +11,17 @@
 
 <div class="cols">
 <div class="card"><h3>Users &amp; roles</h3>
-<table class="list"><tr><th>Email</th><th>Name</th><th>Role</th><th>Last login</th><th></th></tr>
+{% if request.query_params.get('temp') %}
+<div class="card" style="background:#FFF6DA;border-color:#E8C86A">
+<p><b>Temporary password for {{ request.query_params.get('for') }}</b></p>
+<p><code style="font-size:17px;user-select:all">{{ request.query_params.get('temp') }}</code></p>
+<p class="hint">Shown once and never stored in readable form &mdash; copy it now. Send it however you
+would send anything else sensitive, and they will be made to choose their own password the moment
+they sign in. Any password they had before no longer works.</p></div>
+{% endif %}
+{% if request.query_params.get('ok') == 'unlocked' %}<p class="hint" style="color:#2e7d32">Account unlocked.</p>{% endif %}
+{% if request.query_params.get('err') == 'nouser' %}<p class="hint" style="color:#b00">No such user.</p>{% endif %}
+<table class="list"><tr><th>Email</th><th>Name</th><th>Role</th><th>Password</th><th>Last login</th><th></th></tr>
 {% for u in users %}<tr>
 <td>{{ u.email }}{% if u.email == user.email %} <span class="sub2">(you)</span>{% endif %}</td>
 <td>{{ u.name }}</td>
@@ -19,11 +29,30 @@
 <input type="hidden" name="email" value="{{ u.email }}">
 <select name="role">{% for r in ['viewer','editor','admin'] %}<option {% if u.role==r %}selected{% endif %}>{{ r }}</option>{% endfor %}</select>
 <button>Set</button></form></td>
+<td class="nowrap">
+{% if auth_mode != 'local' %}<span class="sub2">n/a</span>
+{% elif u.locked_until %}<span class="chip" style="background:#FFC7CE;color:#8a0016">locked</span>
+  <form method="post" action="/admin/user/unlock" class="inline">
+  <input type="hidden" name="email" value="{{ u.email }}"><button>Unlock</button></form>
+{% elif not u.pw_hash %}<span class="chip" style="background:#FFF2CC;color:#5a4a00">not set</span>
+{% elif u.must_change %}<span class="chip" style="background:#FFF2CC;color:#5a4a00">temporary</span>
+{% else %}<span class="chip ready">set</span>{% if u.pw_set_at %}<div class="sub2">{{ u.pw_set_at[:10] }}</div>{% endif %}
+{% endif %}
+{% if auth_mode == 'local' %}
+<form method="post" action="/admin/user/temp-password" class="inline"
+      onsubmit="return confirm('Issue a temporary password for {{ u.email }}? Their current one stops working immediately.')">
+<input type="hidden" name="email" value="{{ u.email }}">
+<button class="btn small ghost" title="Issue a one-time password">Reset</button></form>{% endif %}</td>
 <td class="sub2">{{ u.last_login[:16]|replace('T',' ') if u.last_login else 'never signed in' }}</td>
 <td>{% if u.email != user.email %}<form method="post" action="/admin/user/remove" class="inline"
       onsubmit="return confirm('Remove {{ u.email }}?{% if not allowlist %} They can sign in again and be re-added as an editor, because the user list is not being enforced.{% endif %}')">
 <input type="hidden" name="email" value="{{ u.email }}"><button class="chipx" title="Remove">&times;</button></form>{% endif %}</td>
 </tr>{% endfor %}</table>
+{% if auth_mode == 'local' %}
+<p class="hint">Each person has their own password, stored as a scrypt hash with its own salt &mdash;
+not readable by anyone, including you. A forgotten one is replaced with <b>Reset</b>, which issues a
+one-time password shown once here and forces a change on first use.</p>
+{% endif %}
 
 <h3>Add someone</h3>
 <form method="post" action="/admin/user/add" class="row">

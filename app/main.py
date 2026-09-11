@@ -49,18 +49,46 @@ def now():
 def login_page(request: Request):
     return templates.TemplateResponse(request, "login.html", {"user": None, "mode": AUTH_MODE,
         "domain": ALLOWED_DOMAIN, "warnings": _auth.startup_warnings(),
-        "needs_password": AUTH_MODE == "shared"})
+        "needs_password": AUTH_MODE in ("shared", "local"),
+        "bridge_open": AUTH_MODE == "local" and _auth.shared_password_configured()})
 
 def _client_ip(request: Request):
     fwd = request.headers.get("X-Forwarded-For", "")
     return (fwd.split(",")[0].strip() if fwd else None) or \
            (request.client.host if request.client else "unknown")
 
+def _fail_account(c, email, ip, why):
+    """Count a bad password against the account as well as against the address.
+
+    The per-address counter alone can be walked around by spraying one account
+    from several addresses, which is the shape an attack on a known email takes.
+    """
+    c.execute("UPDATE users SET failed_logins = COALESCE(failed_logins, 0) + 1 "
+              "WHERE lower(email)=lower(?)", (email,))
+    row = c.execute("SELECT failed_logins FROM users WHERE lower(email)=lower(?)",
+                    (email,)).fetchone()
+    if row and (row["failed_logins"] or 0) >= _auth.ACCOUNT_LOCK_AFTER:
+        until = (datetime.datetime.now()
+                 + datetime.timedelta(minutes=_auth.ACCOUNT_LOCK_MINUTES)).isoformat(timespec="seconds")
+        c.execute("UPDATE users SET locked_until=?, failed_logins=0 WHERE lower(email)=lower(?)",
+                  (until, email))
+    c.commit()
+    _auth.note_login_failure(ip)
+    db.log(email, "login:failed", f"{why} from {ip}")
+
 @app.post("/login/dev")
 def login_dev(request: Request, name: str = Form(...), email: str = Form(...),
               password: str = Form("")):
-    """Form login for dev and shared modes; shared additionally needs the password."""
+    """Form login for dev, shared and local modes.
+
+    local is per-person: the password is checked against that account's own hash.
+    While SHARED_PASSWORD is still set it also opens a one-time bridge, but only
+    for an account that has no password of its own - and that sign-in can do
+    nothing except set one. Once everybody has, the bridge grants nothing and
+    SHARED_PASSWORD can be removed.
+    """
     ip = _client_ip(request)
+    email = (email or "").lower().strip()
     if not _auth.form_login_enabled():
         return RedirectResponse("/login", status_code=303)
     if _auth.login_blocked(ip):
@@ -73,16 +101,49 @@ def login_dev(request: Request, name: str = Form(...), email: str = Form(...),
             return RedirectResponse("/login?error=unconfigured", status_code=303)
         if not _auth.shared_password_ok(password):
             _auth.note_login_failure(ip)
-            db.log(email.lower().strip(), "login:failed", f"bad shared password from {ip}")
+            db.log(email, "login:failed", f"bad shared password from {ip}")
             return RedirectResponse("/login?error=password", status_code=303)
     if not _auth.user_known(email):
         _auth.note_login_failure(ip)
-        db.log(email.lower().strip(), "login:refused", f"not on the user list, from {ip}")
+        db.log(email, "login:refused", f"not on the user list, from {ip}")
         return RedirectResponse("/login?error=notinvited", status_code=303)
+
+    must_change = False
+    if AUTH_MODE == "local":
+        c = db.conn()
+        row = c.execute("SELECT * FROM users WHERE lower(email)=lower(?)", (email,)).fetchone()
+        if _auth.account_locked_until(row):
+            c.close()
+            return RedirectResponse("/login?error=locked", status_code=303)
+        if row and row["pw_hash"]:
+            if not _auth.verify_password(password, row["pw_algo"], row["pw_salt"], row["pw_hash"]):
+                _fail_account(c, email, ip, "bad password")
+                c.close()
+                return RedirectResponse("/login?error=password", status_code=303)
+            c.execute("UPDATE users SET failed_logins=0, locked_until='' WHERE id=?", (row["id"],))
+            c.commit()
+            must_change = bool(row["must_change"])
+            name = row["name"] or name
+        elif _auth.shared_password_ok(password):
+            # The bridge. Signed in, but every page will send them to set a
+            # password of their own before anything else happens.
+            must_change = True
+            db.log(email, "login:bridge", "signed in on the shared password")
+        else:
+            # No password of their own and the bridge did not open. Spend the
+            # same work as a real check so a missing account is not detectable
+            # by how quickly the answer comes back.
+            _auth.hash_password(password)
+            _fail_account(c, email, ip, "no password set for this account")
+            c.close()
+            return RedirectResponse("/login?error=nopassword", status_code=303)
+        c.close()
+
     _auth.clear_login_failures(ip)
-    request.session["user"] = {"email": email.lower().strip(), "name": name.strip()}
+    request.session["user"] = {"email": email, "name": name.strip() or email.split("@")[0],
+                               "must_change": must_change}
     _touch_user(request.session["user"])
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse("/account/password" if must_change else "/", status_code=303)
 
 @app.get("/login/sso")
 async def login_sso(request: Request):
@@ -109,6 +170,57 @@ async def auth_callback(request: Request):
 def logout(request: Request):
     request.session.clear()
     return RedirectResponse("/login", status_code=303)
+
+@app.get("/account/password", response_class=HTMLResponse)
+def account_password(request: Request, user=Depends(require_user)):
+    """Set or change your own password. Also the wall a temporary one lands on."""
+    c = db.conn()
+    row = c.execute("SELECT * FROM users WHERE lower(email)=lower(?)", (user["email"],)).fetchone()
+    c.close()
+    return templates.TemplateResponse(request, "account.html", {"user": user,
+        "mode": AUTH_MODE, "has_password": bool(row and row["pw_hash"]),
+        "must_change": bool(user.get("must_change")),
+        "set_at": (row["pw_set_at"] if row else "") or "",
+        "min_len": _auth.MIN_PASSWORD})
+
+@app.post("/account/password")
+def account_password_save(request: Request, current: str = Form(""), new: str = Form(...),
+                          confirm: str = Form(""), user=Depends(require_user)):
+    if AUTH_MODE != "local":
+        return RedirectResponse("/", status_code=303)
+    c = db.conn()
+    row = c.execute("SELECT * FROM users WHERE lower(email)=lower(?)", (user["email"],)).fetchone()
+    if not row:
+        c.close()
+        return RedirectResponse("/logout", status_code=303)
+    # Proving the old password matters only when there is one. Somebody who came
+    # in over the bridge has none to prove, and the session already carries the
+    # proof they knew the shared password.
+    if row["pw_hash"] and not _auth.verify_password(current, row["pw_algo"], row["pw_salt"],
+                                                    row["pw_hash"]):
+        c.close()
+        db.log(user["email"], "password:failed", "current password did not match")
+        return RedirectResponse("/account/password?err=current", status_code=303)
+    if new != confirm:
+        c.close()
+        return RedirectResponse("/account/password?err=match", status_code=303)
+    if len(new or "") < _auth.MIN_PASSWORD:
+        c.close()
+        return RedirectResponse("/account/password?err=short", status_code=303)
+    if _auth.password_problem(new, user["email"]):
+        c.close()
+        return RedirectResponse("/account/password?err=email", status_code=303)
+    algo, salt, hashed = _auth.hash_password(new)
+    c.execute("UPDATE users SET pw_algo=?, pw_salt=?, pw_hash=?, pw_set_at=?, must_change=0, "
+              "failed_logins=0, locked_until='' WHERE id=?", (algo, salt, hashed, now(), row["id"]))
+    c.commit(); c.close()
+    # The session carried the must-change flag; clear it or every page keeps
+    # redirecting back here.
+    sess = dict(request.session.get("user") or {})
+    sess["must_change"] = False
+    request.session["user"] = sess
+    db.log(user["email"], "password:set", "changed their own password")
+    return RedirectResponse("/?ok=password", status_code=303)
 
 def _touch_user(user):
     # A login is a good moment to check whether today's snapshot exists: it is
@@ -1625,6 +1737,38 @@ def admin_add_user(request: Request, email: str = Form(...), name: str = Form(""
     c.commit(); c.close()
     db.log(user["email"], "user:add", f"{em} as {role}")
     return RedirectResponse("/admin?ok=added", status_code=303)
+
+@app.post("/admin/user/temp-password")
+def admin_temp_password(request: Request, email: str = Form(...), user=Depends(require_admin)):
+    """Issue a one-time password for somebody who is locked out or new.
+
+    There is no email to send a reset link through, so an admin hands it over
+    and the app makes sure it cannot outlive its purpose: it is shown once, and
+    the account can do nothing but change it until it has.
+    """
+    em = email.strip().lower()
+    c = db.conn()
+    row = c.execute("SELECT id FROM users WHERE lower(email)=?", (em,)).fetchone()
+    if not row:
+        c.close()
+        return RedirectResponse("/admin?err=nouser", status_code=303)
+    temp = _auth.temp_password()
+    algo, salt, hashed = _auth.hash_password(temp)
+    c.execute("UPDATE users SET pw_algo=?, pw_salt=?, pw_hash=?, pw_set_at=?, must_change=1, "
+              "failed_logins=0, locked_until='' WHERE id=?", (algo, salt, hashed, now(), row["id"]))
+    c.commit(); c.close()
+    # The password itself is never written to the log - only that one was issued.
+    db.log(user["email"], "user:temp-password", f"issued a temporary password for {em}")
+    return RedirectResponse(f"/admin?temp={temp}&for={em}", status_code=303)
+
+@app.post("/admin/user/unlock")
+def admin_unlock_user(request: Request, email: str = Form(...), user=Depends(require_admin)):
+    em = email.strip().lower()
+    c = db.conn()
+    c.execute("UPDATE users SET failed_logins=0, locked_until='' WHERE lower(email)=?", (em,))
+    c.commit(); c.close()
+    db.log(user["email"], "user:unlock", em)
+    return RedirectResponse("/admin?ok=unlocked", status_code=303)
 
 @app.post("/admin/user/remove")
 def admin_remove_user(request: Request, email: str = Form(...), user=Depends(require_admin)):

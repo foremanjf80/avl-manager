@@ -861,3 +861,35 @@ The absent case is now named rather than implied - one `cur` value drives both
 the cell colour and the selected option. The CSV and PPTX exports say No Info
 too, instead of leaving the column blank, since blank in a spreadsheet reads as
 missing data when it is actually an answer.
+
+## v43 - AUTH_MODE=local: a password per person
+A shared password cannot be revoked for one person, and the audit trail can only
+record the address somebody typed. `AUTH_MODE=local` gives each person their own,
+on the same login form.
+
+Passwords are stored as **scrypt** hashes (stdlib, memory-hard) with a per-person
+random salt, and the cost parameters are recorded beside each hash so they can be
+raised later without invalidating anybody. Nothing is reversible: a forgotten
+password is replaced, never recovered, and no password is ever written to the
+audit log.
+
+**Changing over without locking anyone out.** Leave `SHARED_PASSWORD` set and it
+becomes a one-time bridge: it works *only* for an account that has no password of
+its own, and that sign-in can do nothing but choose one - every other page
+redirects to the password form until it has. Once everybody has signed in once,
+the bridge grants nothing and `SHARED_PASSWORD` can be removed. Set
+`REQUIRE_KNOWN_USER=1` while it is open so only addresses already on the Admin
+list can use it.
+
+**Admin**, on /admin: a Password column showing set / temporary / not set /
+locked, a **Reset** that issues a one-time password shown once on that page, and
+an **Unlock**. The reset takes effect on a session that is already open, because
+the requirement to change is read from the database on every request rather than
+trusted from the cookie.
+
+**Lockout** is now two counters doing different jobs: 8 failures locks one
+account for 15 minutes (someone guessing at a known address), 20 from one IP in
+15 minutes blocks that address (a spray across accounts, with room for a whole
+office arriving from one NAT address).
+
+`dev`, `shared`, `oidc` and `easyauth` are untouched.

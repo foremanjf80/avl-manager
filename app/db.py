@@ -337,6 +337,20 @@ def _migrate(c):
     # that owes the evidence - SQT, Dev. PM, RBO planning / CE - copied from the
     # tracker, and those were being offered in the same control as named people.
     # Split them: the team is a label, the owner is a person.
+    # Per-person passwords (AUTH_MODE=local). The hash and its salt live beside
+    # the algorithm that produced them, so the cost parameters can be raised
+    # later without invalidating anybody's password. Nothing here is reversible:
+    # a forgotten password is replaced by an admin, never recovered.
+    us = [r[1] for r in c.execute("PRAGMA table_info(users)")]
+    if us and "pw_hash" not in us:
+        for col, ddl in (("pw_hash", "TEXT DEFAULT ''"), ("pw_salt", "TEXT DEFAULT ''"),
+                         ("pw_algo", "TEXT DEFAULT ''"), ("pw_set_at", "TEXT DEFAULT ''"),
+                         ("must_change", "INTEGER DEFAULT 0"),
+                         ("failed_logins", "INTEGER DEFAULT 0"),
+                         ("locked_until", "TEXT DEFAULT ''")):
+            c.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
+        c.commit()
+
     iri = [r[1] for r in c.execute("PRAGMA table_info(ie_report_items)")]
     if iri and "source_team" not in iri:
         c.execute("ALTER TABLE ie_report_items ADD COLUMN source_team TEXT DEFAULT ''")

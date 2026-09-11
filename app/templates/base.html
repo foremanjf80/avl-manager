@@ -21,5 +21,6 @@
 <a href="/digest" class="{{ 'active' if path.startswith('/digest') }}">Digest</a>
 <a href="/activity" class="{{ 'active' if path.startswith('/activity') or path.startswith('/history') or path.startswith('/audit') }}">Activity</a>
 {% if user and user.get('role') == 'admin' %}<a href="/admin" class="{{ 'active' if path.startswith('/admin') }}">Admin</a>{% endif %}</nav>
-<span class="who">{% if user %}{{ user.name }} <span class="email">({{ user.email }})</span> <a href="/logout">Logout</a>{% endif %}</span>
+<span class="who">{% if user %}{{ user.name }} <span class="email">({{ user.email }})</span>
+<a href="/account/password" title="Change your password">Password</a> <a href="/logout">Logout</a>{% endif %}</span>
 </header><main>{% block body %}{% endblock %}</main></body></html>

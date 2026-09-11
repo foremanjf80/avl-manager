@@ -1,0 +1,40 @@
+{% extends "base.html" %}{% block body %}
+<div class="card narrow">
+{% if must_change %}
+<h2>Choose a password</h2>
+<p class="hint">You signed in with a {{ 'temporary' if has_password else 'shared' }} password. Pick
+your own before carrying on &mdash; nothing else is reachable until you do.</p>
+{% else %}
+<h2>Your password</h2>
+{% if set_at %}<p class="hint">Last changed {{ set_at[:10] }}.</p>{% endif %}
+{% endif %}
+
+{% set err = request.query_params.get('err') %}
+{% if err == 'current' %}<p class="err">That is not your current password.</p>
+{% elif err == 'match' %}<p class="err">The two new passwords do not match.</p>
+{% elif err == 'short' %}<p class="err">Use at least {{ min_len }} characters.</p>
+{% elif err == 'email' %}<p class="err">That is your email address &mdash; pick something else.</p>
+{% endif %}
+
+{% if mode != 'local' %}
+<p class="hint">This deployment does not use per-person passwords
+(<code>AUTH_MODE={{ mode }}</code>), so there is nothing to change here.</p>
+{% else %}
+<form method="post" action="/account/password">
+{% if has_password %}
+<label>Current password
+  <input name="current" type="password" required autocomplete="current-password"></label>
+{% endif %}
+<label>New password
+  <input name="new" type="password" required minlength="{{ min_len }}" autocomplete="new-password"></label>
+<label>New password again
+  <input name="confirm" type="password" required minlength="{{ min_len }}" autocomplete="new-password"></label>
+<button>Save password</button>
+</form>
+<p class="hint">At least {{ min_len }} characters. Length is what matters, so a phrase you can
+remember beats a short scramble you cannot. It is stored as a scrypt hash with its own salt: nobody
+can read it back, which is also why a forgotten one has to be replaced by an admin rather than looked
+up.</p>
+{% endif %}
+</div>
+{% endblock %}
