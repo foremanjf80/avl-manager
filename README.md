@@ -899,3 +899,21 @@ minutes blocks that address (a spray across accounts, with room for a whole
 office arriving from one NAT address).
 
 `dev`, `oidc` and `easyauth` are untouched.
+
+## v44 - The status matrix, read at arm's length
+The dashboard grid is the page people look at most, so the status is now the
+thing that reads first: **15px bold, near-black, centred in its cell** rather
+than 13.5px grey left-aligned.
+
+Two changes bought back the space that made room for it. The native dropdown
+arrow is gone - about twenty pixels per cell across twelve columns, saying
+nothing the colour and the hover state do not already say. And the select and its
+two icons now share one line: they used to stack, which doubled the height of
+every row in the grid for no information. Cell padding drops from 6/7px to 3/4px.
+
+Columns widen slightly, 120px to 132px, because "Listed, Conditional" at 15px
+bold does not fit in the old width - and a clipped status is worse than a wider
+column. The grid already scrolls horizontally.
+
+It is still a dropdown: hover lightens the cell, keyboard focus draws an outline,
+and changing it still saves immediately.
