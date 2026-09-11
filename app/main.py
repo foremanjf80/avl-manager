@@ -81,11 +81,11 @@ def login_dev(request: Request, name: str = Form(...), email: str = Form(...),
               password: str = Form("")):
     """Form login for dev, shared and local modes.
 
-    local is per-person: the password is checked against that account's own hash.
-    While SHARED_PASSWORD is still set it also opens a one-time bridge, but only
-    for an account that has no password of its own - and that sign-in can do
-    nothing except set one. Once everybody has, the bridge grants nothing and
-    SHARED_PASSWORD can be removed.
+    local is per-person, arrived at gradually. If the account has a password of
+    its own, that is what is checked and the team password will not open it. If
+    it has not set one yet, the team password still works and keeps working -
+    people move over when they choose to, not when the app insists. Once everyone
+    has, removing SHARED_PASSWORD closes the door behind them.
     """
     ip = _client_ip(request)
     email = (email or "").lower().strip()
@@ -125,10 +125,10 @@ def login_dev(request: Request, name: str = Form(...), email: str = Form(...),
             must_change = bool(row["must_change"])
             name = row["name"] or name
         elif _auth.shared_password_ok(password):
-            # The bridge. Signed in, but every page will send them to set a
-            # password of their own before anything else happens.
-            must_change = True
-            db.log(email, "login:bridge", "signed in on the shared password")
+            # No password of their own yet, so the team password still opens the
+            # door. Nothing is forced: there is a standing offer on the account
+            # page and that is where it stays until they take it.
+            db.log(email, "login:shared", "signed in on the team password")
         else:
             # No password of their own and the bridge did not open. Spend the
             # same work as a real check so a missing account is not detectable
@@ -180,6 +180,7 @@ def account_password(request: Request, user=Depends(require_user)):
     return templates.TemplateResponse(request, "account.html", {"user": user,
         "mode": AUTH_MODE, "has_password": bool(row and row["pw_hash"]),
         "must_change": bool(user.get("must_change")),
+        "team_password_works": _auth.shared_password_configured(),
         "set_at": (row["pw_set_at"] if row else "") or "",
         "min_len": _auth.MIN_PASSWORD})
 

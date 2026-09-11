@@ -873,13 +873,15 @@ raised later without invalidating anybody. Nothing is reversible: a forgotten
 password is replaced, never recovered, and no password is ever written to the
 audit log.
 
-**Changing over without locking anyone out.** Leave `SHARED_PASSWORD` set and it
-becomes a one-time bridge: it works *only* for an account that has no password of
-its own, and that sign-in can do nothing but choose one - every other page
-redirects to the password form until it has. Once everybody has signed in once,
-the bridge grants nothing and `SHARED_PASSWORD` can be removed. Set
-`REQUIRE_KNOWN_USER=1` while it is open so only addresses already on the Admin
-list can use it.
+**Nobody is made to switch.** Leave `SHARED_PASSWORD` set and the team password
+carries on working for anyone who has not set their own - indefinitely, with no
+warning and no wall. Setting a personal password is an offer on the account page,
+taken whenever that person feels like it. Once they take it, the team password
+stops opening *their* account and keeps opening everyone else's. When the Admin
+page shows everyone as `set`, removing `SHARED_PASSWORD` closes the shared route.
+
+The one exception is a temporary password an admin issued: because the admin
+knows what it is, that sign-in has to be replaced before anything else.
 
 **Admin**, on /admin: a Password column showing set / temporary / not set /
 locked, a **Reset** that issues a one-time password shown once on that page, and
@@ -887,7 +889,7 @@ an **Unlock**. The reset takes effect on a session that is already open, because
 the requirement to change is read from the database on every request rather than
 trusted from the cookie.
 
-**Lockout** is now two counters doing different jobs: 8 failures locks one
+**Lockout** is two counters doing different jobs: 8 failures locks one
 account for 15 minutes (someone guessing at a known address), 20 from one IP in
 15 minutes blocks that address (a spray across accounts, with room for a whole
 office arriving from one NAT address).

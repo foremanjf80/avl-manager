@@ -2,11 +2,16 @@
 <div class="card narrow">
 {% if must_change %}
 <h2>Choose a password</h2>
-<p class="hint">You signed in with a {{ 'temporary' if has_password else 'shared' }} password. Pick
-your own before carrying on &mdash; nothing else is reachable until you do.</p>
-{% else %}
+<p class="hint">You signed in with a temporary password an admin issued. Because they know what it
+is, pick your own before carrying on.</p>
+{% elif has_password %}
 <h2>Your password</h2>
 {% if set_at %}<p class="hint">Last changed {{ set_at[:10] }}.</p>{% endif %}
+{% else %}
+<h2>Set your own password</h2>
+<p class="hint">You are signing in with the team password, which is fine and will keep working. If
+you would rather have one only you know, set it here &mdash; the team password then stops working for
+your account, and nothing else changes.</p>
 {% endif %}
 
 {% set err = request.query_params.get('err') %}
@@ -17,8 +22,10 @@ your own before carrying on &mdash; nothing else is reachable until you do.</p>
 {% endif %}
 
 {% if mode != 'local' %}
-<p class="hint">This deployment does not use per-person passwords
-(<code>AUTH_MODE={{ mode }}</code>), so there is nothing to change here.</p>
+<p class="hint">This deployment signs everyone in with one team password
+(<code>AUTH_MODE={{ mode }}</code>), so there is no personal password to change. An admin can switch
+it to <code>AUTH_MODE=local</code>, which keeps the team password working and lets people set their
+own whenever they want to.</p>
 {% else %}
 <form method="post" action="/account/password">
 {% if has_password %}
@@ -29,12 +36,14 @@ your own before carrying on &mdash; nothing else is reachable until you do.</p>
   <input name="new" type="password" required minlength="{{ min_len }}" autocomplete="new-password"></label>
 <label>New password again
   <input name="confirm" type="password" required minlength="{{ min_len }}" autocomplete="new-password"></label>
-<button>Save password</button>
+<button>{{ 'Save password' if has_password else 'Set my password' }}</button>
 </form>
-<p class="hint">At least {{ min_len }} characters. Length is what matters, so a phrase you can
-remember beats a short scramble you cannot. It is stored as a scrypt hash with its own salt: nobody
-can read it back, which is also why a forgotten one has to be replaced by an admin rather than looked
-up.</p>
+<p class="hint">At least {{ min_len }} characters &mdash; length is what matters, so a phrase you can
+remember works well. It is stored as a scrypt hash with its own salt, so nobody can read it back,
+which is also why a forgotten one is replaced by an admin rather than looked up.</p>
+{% if has_password and team_password_works %}
+<p class="hint">The team password no longer opens your account &mdash; only this one does.</p>
+{% endif %}
 {% endif %}
 </div>
 {% endblock %}

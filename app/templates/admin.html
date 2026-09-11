@@ -34,7 +34,7 @@ they sign in. Any password they had before no longer works.</p></div>
 {% elif u.locked_until %}<span class="chip" style="background:#FFC7CE;color:#8a0016">locked</span>
   <form method="post" action="/admin/user/unlock" class="inline">
   <input type="hidden" name="email" value="{{ u.email }}"><button>Unlock</button></form>
-{% elif not u.pw_hash %}<span class="chip" style="background:#FFF2CC;color:#5a4a00">not set</span>
+{% elif not u.pw_hash %}<span class="chip gen">team password</span>
 {% elif u.must_change %}<span class="chip" style="background:#FFF2CC;color:#5a4a00">temporary</span>
 {% else %}<span class="chip ready">set</span>{% if u.pw_set_at %}<div class="sub2">{{ u.pw_set_at[:10] }}</div>{% endif %}
 {% endif %}
@@ -49,9 +49,13 @@ they sign in. Any password they had before no longer works.</p></div>
 <input type="hidden" name="email" value="{{ u.email }}"><button class="chipx" title="Remove">&times;</button></form>{% endif %}</td>
 </tr>{% endfor %}</table>
 {% if auth_mode == 'local' %}
-<p class="hint">Each person has their own password, stored as a scrypt hash with its own salt &mdash;
-not readable by anyone, including you. A forgotten one is replaced with <b>Reset</b>, which issues a
-one-time password shown once here and forces a change on first use.</p>
+<p class="hint">People move to their own password when they want to &mdash; anyone showing
+<b>team password</b> is still using the shared one, which keeps working for them. Once someone sets
+their own, the team password no longer opens their account. When everybody shows <b>set</b>, removing
+<code>SHARED_PASSWORD</code> closes the shared route for good.</p>
+<p class="hint">Passwords are scrypt hashes with their own salt &mdash; not readable by anyone,
+including you. A forgotten one is replaced with <b>Reset</b>, which issues a one-time password shown
+once here and requires a change on first use.</p>
 {% endif %}
 
 <h3>Add someone</h3>

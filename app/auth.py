@@ -146,21 +146,10 @@ def startup_warnings():
         out.append("AUTH_MODE=shared but SHARED_PASSWORD is missing or shorter than "
                    "%d characters. All logins will be refused until it is set."
                    % MIN_SHARED_PASSWORD)
-    if AUTH_MODE == "shared" and behind_tls:
-        out.append("AUTH_MODE=shared: one password for everyone, so it cannot be "
-                   "revoked for one person and the audit trail records only the "
-                   "address someone typed. AUTH_MODE=local gives each person their "
-                   "own password using the same login form.")
-    if AUTH_MODE == "local" and shared_password_configured():
-        out.append("SHARED_PASSWORD is still set. That is the changeover bridge: it "
-                   "now works only for accounts that have no password of their own, "
-                   "and each one is made to set a personal password immediately. "
-                   "Remove SHARED_PASSWORD once everybody has signed in once.")
-    if AUTH_MODE == "local" and shared_password_configured() and not REQUIRE_KNOWN_USER:
-        out.append("While the bridge is open, anyone with the shared password and an "
-                   "@%s address can create an account. Set REQUIRE_KNOWN_USER=1 so "
-                   "only addresses already on the Admin user list can sign in."
-                   % ALLOWED_DOMAIN)
+    if AUTH_MODE == "local" and not shared_password_configured():
+        out.append("AUTH_MODE=local with no SHARED_PASSWORD: anyone who has not set "
+                   "a password of their own cannot sign in until an admin issues "
+                   "them a temporary one from the Admin page.")
     if os.environ.get("SECRET_KEY", "change-me-in-prod") == "change-me-in-prod" and behind_tls:
         out.append("SECRET_KEY is still the default while hosted: sessions are forgeable.")
     return out
@@ -213,11 +202,11 @@ def require_user(request: Request):
         user["role"] = get_role(user["email"])
     except Exception:
         user["role"] = "editor"
-    # Signed in on a temporary or bridge password: nothing else until it is
-    # replaced. Read from the database rather than trusted from the session, so
-    # an admin issuing a temporary password takes hold of a session that is
-    # already open instead of waiting for the person to sign out. No password at
-    # all counts too - that is somebody who came in over the changeover bridge.
+    # The only thing that forces a change is a temporary password an admin
+    # issued and therefore knows. Signing in on the team password does not: people
+    # move to their own when they choose to. Read from the database rather than
+    # trusted from the session, so a reset takes hold of a session that is
+    # already open instead of waiting for that person to sign out.
     if AUTH_MODE == "local":
         try:
             from . import db
@@ -225,7 +214,8 @@ def require_user(request: Request):
             row = c.execute("SELECT pw_hash, must_change FROM users WHERE lower(email)=lower(?)",
                             (user["email"],)).fetchone()
             c.close()
-            user["must_change"] = bool(row) and (bool(row["must_change"]) or not row["pw_hash"])
+            user["must_change"] = bool(row) and bool(row["must_change"])
+            user["own_password"] = bool(row) and bool(row["pw_hash"])
         except Exception:
             pass          # a lookup failure must not lock everybody out
     if user.get("must_change") and not request.url.path.startswith(_PW_EXEMPT):

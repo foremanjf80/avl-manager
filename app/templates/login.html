@@ -20,17 +20,21 @@ admin to issue you a temporary one from the Admin page.</p>
   {% if mode == 'local' %}placeholder="only needed the first time"{% endif %}></label>
 <label>Email <input name="email" type="email" placeholder="you@{{ domain }}" required
   autocomplete="username"></label>
-{% if needs_password %}<label>{{ 'Password' if mode == 'local' else 'Team password' }}
+{% if needs_password %}<label>{{ 'Password' if mode == 'local' and not bridge_open else 'Team password' }}
   <input name="password" type="password" required autocomplete="current-password"></label>{% endif %}
 <button>Sign in</button></form>
 {% if mode == 'local' %}
-<p class="hint">Your own password, not a shared one. Eight wrong attempts locks the account for 15
-minutes; an admin can unlock it or issue a temporary password. Forgotten passwords are replaced,
-never recovered &mdash; nobody, including an admin, can read yours.</p>
 {% if bridge_open %}
-<p class="hint">First time here? Sign in with the old team password and you will be asked to choose
-your own straight away. It works only for accounts that have not set one yet.</p>
+<p class="hint">Use the team password as usual, or your own if you have set one. To set one, sign in
+and click <b>Password</b> at the top right &mdash; there is no rush, and the team password keeps
+working until you do.</p>
+{% else %}
+<p class="hint">Your own password. If you have not set one, ask an admin to issue you a temporary
+one.</p>
 {% endif %}
+<p class="hint">Eight wrong attempts locks an account for 15 minutes; an admin can unlock it.
+Forgotten passwords are replaced rather than recovered &mdash; nobody, including an admin, can read
+yours.</p>
 {% elif needs_password %}
 <p class="hint">One password shared by the team, plus an @{{ domain }} address. A stopgap until SSO is
 available: it identifies the team, not the person, so the name and email you enter are what the audit
