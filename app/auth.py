@@ -67,6 +67,17 @@ def backup_token_ok(supplied):
 def form_login_enabled():
     return AUTH_MODE in ("dev", "shared", "local")
 
+def personal_passwords_enabled():
+    """Whether an account can have a password of its own.
+
+    True for shared as well as local, because the two differ only in whether a
+    team password exists at all - both prefer an account's own password when it
+    has one. That means nobody has to reconfigure anything for one person to
+    move over, and local is simply where you end up once the team password is
+    gone.
+    """
+    return AUTH_MODE in ("shared", "local")
+
 
 # ---- per-person passwords (AUTH_MODE=local) --------------------------------
 # scrypt from the standard library: memory-hard, so a stolen database cannot be
@@ -207,7 +218,7 @@ def require_user(request: Request):
     # move to their own when they choose to. Read from the database rather than
     # trusted from the session, so a reset takes hold of a session that is
     # already open instead of waiting for that person to sign out.
-    if AUTH_MODE == "local":
+    if personal_passwords_enabled():
         try:
             from . import db
             c = db.conn()

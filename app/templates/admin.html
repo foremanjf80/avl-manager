@@ -30,7 +30,7 @@ they sign in. Any password they had before no longer works.</p></div>
 <select name="role">{% for r in ['viewer','editor','admin'] %}<option {% if u.role==r %}selected{% endif %}>{{ r }}</option>{% endfor %}</select>
 <button>Set</button></form></td>
 <td class="nowrap">
-{% if auth_mode != 'local' %}<span class="sub2">n/a</span>
+{% if auth_mode not in ('shared', 'local') %}<span class="sub2">n/a</span>
 {% elif u.locked_until %}<span class="chip" style="background:#FFC7CE;color:#8a0016">locked</span>
   <form method="post" action="/admin/user/unlock" class="inline">
   <input type="hidden" name="email" value="{{ u.email }}"><button>Unlock</button></form>
@@ -38,7 +38,7 @@ they sign in. Any password they had before no longer works.</p></div>
 {% elif u.must_change %}<span class="chip" style="background:#FFF2CC;color:#5a4a00">temporary</span>
 {% else %}<span class="chip ready">set</span>{% if u.pw_set_at %}<div class="sub2">{{ u.pw_set_at[:10] }}</div>{% endif %}
 {% endif %}
-{% if auth_mode == 'local' %}
+{% if auth_mode in ('shared', 'local') %}
 <form method="post" action="/admin/user/temp-password" class="inline"
       onsubmit="return confirm('Issue a temporary password for {{ u.email }}? Their current one stops working immediately.')">
 <input type="hidden" name="email" value="{{ u.email }}">
@@ -48,7 +48,7 @@ they sign in. Any password they had before no longer works.</p></div>
       onsubmit="return confirm('Remove {{ u.email }}?{% if not allowlist %} They can sign in again and be re-added as an editor, because the user list is not being enforced.{% endif %}')">
 <input type="hidden" name="email" value="{{ u.email }}"><button class="chipx" title="Remove">&times;</button></form>{% endif %}</td>
 </tr>{% endfor %}</table>
-{% if auth_mode == 'local' %}
+{% if auth_mode in ('shared', 'local') %}
 <p class="hint">People move to their own password when they want to &mdash; anyone showing
 <b>team password</b> is still using the shared one, which keeps working for them. Once someone sets
 their own, the team password no longer opens their account. When everybody shows <b>set</b>, removing

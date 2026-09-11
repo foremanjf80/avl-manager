@@ -862,36 +862,40 @@ the cell colour and the selected option. The CSV and PPTX exports say No Info
 too, instead of leaving the column blank, since blank in a spreadsheet reads as
 missing data when it is actually an answer.
 
-## v43 - AUTH_MODE=local: a password per person
+## v43 - A password per person, whenever each person wants one
 A shared password cannot be revoked for one person, and the audit trail can only
-record the address somebody typed. `AUTH_MODE=local` gives each person their own,
-on the same login form.
+record the address somebody typed. So an account can now have a password of its
+own - and **nothing has to be reconfigured for that to be true.** It works in
+`shared` mode, the mode this already runs in.
 
-Passwords are stored as **scrypt** hashes (stdlib, memory-hard) with a per-person
-random salt, and the cost parameters are recorded beside each hash so they can be
-raised later without invalidating anybody. Nothing is reversible: a forgotten
-password is replaced, never recovered, and no password is ever written to the
-audit log.
+The rule is the same in `shared` and `local`: if an account has its own password,
+that is what opens it and the team password will not. If it has not set one, the
+team password does, and keeps doing so indefinitely. `local` is simply where a
+deployment ends up once `SHARED_PASSWORD` is removed, and needs no separate
+migration.
 
-**Nobody is made to switch.** Leave `SHARED_PASSWORD` set and the team password
-carries on working for anyone who has not set their own - indefinitely, with no
-warning and no wall. Setting a personal password is an offer on the account page,
-taken whenever that person feels like it. Once they take it, the team password
-stops opening *their* account and keeps opening everyone else's. When the Admin
-page shows everyone as `set`, removing `SHARED_PASSWORD` closes the shared route.
+Nobody is prompted, warned or walled. Setting a personal password is a standing
+offer behind **Password** in the header, taken when that person feels like it.
+Taking it stops the team password opening *their* account and leaves everyone
+else's alone, so the changeover happens one person at a time.
 
-The one exception is a temporary password an admin issued: because the admin
-knows what it is, that sign-in has to be replaced before anything else.
+The one thing that does insist is a temporary password an admin issued: because
+the admin knows what it is, that sign-in has to be replaced before anything else.
 
-**Admin**, on /admin: a Password column showing set / temporary / not set /
-locked, a **Reset** that issues a one-time password shown once on that page, and
-an **Unlock**. The reset takes effect on a session that is already open, because
-the requirement to change is read from the database on every request rather than
-trusted from the cookie.
+Passwords are **scrypt** hashes (stdlib, memory-hard) with a per-person random
+salt, the cost parameters recorded beside each hash so they can be raised later
+without invalidating anybody. Nothing is reversible: a forgotten password is
+replaced, never recovered, and no password is ever written to the audit log.
 
-**Lockout** is two counters doing different jobs: 8 failures locks one
-account for 15 minutes (someone guessing at a known address), 20 from one IP in
-15 minutes blocks that address (a spray across accounts, with room for a whole
+**Admin**, on /admin: a Password column showing `set` / `temporary` /
+`team password` / `locked`, a **Reset** issuing a one-time password shown once on
+that page, and an **Unlock**. A reset takes hold of a session that is already
+open, because the requirement to change is read from the database on every
+request rather than trusted from the cookie.
+
+**Lockout** is two counters doing different jobs: 8 failures locks one account
+for 15 minutes (someone guessing at a known address), 20 from one IP in 15
+minutes blocks that address (a spray across accounts, with room for a whole
 office arriving from one NAT address).
 
-`dev`, `shared`, `oidc` and `easyauth` are untouched.
+`dev`, `oidc` and `easyauth` are untouched.

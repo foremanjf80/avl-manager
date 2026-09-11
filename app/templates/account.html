@@ -4,6 +4,8 @@
 <h2>Choose a password</h2>
 <p class="hint">You signed in with a temporary password an admin issued. Because they know what it
 is, pick your own before carrying on.</p>
+{% elif not personal %}
+<h2>Your password</h2>
 {% elif has_password %}
 <h2>Your password</h2>
 {% if set_at %}<p class="hint">Last changed {{ set_at[:10] }}.</p>{% endif %}
@@ -21,11 +23,9 @@ your account, and nothing else changes.</p>
 {% elif err == 'email' %}<p class="err">That is your email address &mdash; pick something else.</p>
 {% endif %}
 
-{% if mode != 'local' %}
-<p class="hint">This deployment signs everyone in with one team password
-(<code>AUTH_MODE={{ mode }}</code>), so there is no personal password to change. An admin can switch
-it to <code>AUTH_MODE=local</code>, which keeps the team password working and lets people set their
-own whenever they want to.</p>
+{% if not personal %}
+<p class="hint">This deployment authenticates people another way
+(<code>AUTH_MODE={{ mode }}</code>), so there is no password held here to change.</p>
 {% else %}
 <form method="post" action="/account/password">
 {% if has_password %}

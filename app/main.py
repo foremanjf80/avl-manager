@@ -49,8 +49,9 @@ def now():
 def login_page(request: Request):
     return templates.TemplateResponse(request, "login.html", {"user": None, "mode": AUTH_MODE,
         "domain": ALLOWED_DOMAIN, "warnings": _auth.startup_warnings(),
-        "needs_password": AUTH_MODE in ("shared", "local"),
-        "bridge_open": AUTH_MODE == "local" and _auth.shared_password_configured()})
+        "needs_password": _auth.personal_passwords_enabled(),
+        "personal": _auth.personal_passwords_enabled(),
+        "bridge_open": _auth.shared_password_configured()})
 
 def _client_ip(request: Request):
     fwd = request.headers.get("X-Forwarded-For", "")
@@ -77,15 +78,16 @@ def _fail_account(c, email, ip, why):
     db.log(email, "login:failed", f"{why} from {ip}")
 
 @app.post("/login/dev")
-def login_dev(request: Request, name: str = Form(...), email: str = Form(...),
+def login_dev(request: Request, email: str = Form(...), name: str = Form(""),
               password: str = Form("")):
     """Form login for dev, shared and local modes.
 
-    local is per-person, arrived at gradually. If the account has a password of
-    its own, that is what is checked and the team password will not open it. If
-    it has not set one yet, the team password still works and keeps working -
-    people move over when they choose to, not when the app insists. Once everyone
-    has, removing SHARED_PASSWORD closes the door behind them.
+    shared and local are the same rule: if the account has a password of its own,
+    that is what opens it and the team password will not. If it has not set one,
+    the team password does, and keeps doing so - people move over when they
+    choose to rather than when the app insists. The only difference between the
+    two modes is whether a team password exists at all, so local is simply where
+    a deployment ends up once SHARED_PASSWORD is removed.
     """
     ip = _client_ip(request)
     email = (email or "").lower().strip()
@@ -96,20 +98,11 @@ def login_dev(request: Request, name: str = Form(...), email: str = Form(...),
     if not domain_ok(email):
         _auth.note_login_failure(ip)
         return RedirectResponse("/login?error=domain", status_code=303)
-    if AUTH_MODE == "shared":
-        if not _auth.shared_password_configured():
-            return RedirectResponse("/login?error=unconfigured", status_code=303)
-        if not _auth.shared_password_ok(password):
-            _auth.note_login_failure(ip)
-            db.log(email, "login:failed", f"bad shared password from {ip}")
-            return RedirectResponse("/login?error=password", status_code=303)
-    if not _auth.user_known(email):
-        _auth.note_login_failure(ip)
-        db.log(email, "login:refused", f"not on the user list, from {ip}")
-        return RedirectResponse("/login?error=notinvited", status_code=303)
 
-    must_change = False
-    if AUTH_MODE == "local":
+    # The password is checked before membership, so that someone who does not
+    # know it cannot learn which addresses have accounts.
+    must_change, row = False, None
+    if _auth.personal_passwords_enabled():
         c = db.conn()
         row = c.execute("SELECT * FROM users WHERE lower(email)=lower(?)", (email,)).fetchone()
         if _auth.account_locked_until(row):
@@ -125,19 +118,31 @@ def login_dev(request: Request, name: str = Form(...), email: str = Form(...),
             must_change = bool(row["must_change"])
             name = row["name"] or name
         elif _auth.shared_password_ok(password):
-            # No password of their own yet, so the team password still opens the
-            # door. Nothing is forced: there is a standing offer on the account
-            # page and that is where it stays until they take it.
             db.log(email, "login:shared", "signed in on the team password")
         else:
-            # No password of their own and the bridge did not open. Spend the
-            # same work as a real check so a missing account is not detectable
-            # by how quickly the answer comes back.
+            # Spend the same work as a real check, so an address without an
+            # account is not identifiable by how quickly the refusal arrives.
             _auth.hash_password(password)
-            _fail_account(c, email, ip, "no password set for this account")
+            if row:
+                _fail_account(c, email, ip, "bad password")
+            else:
+                _auth.note_login_failure(ip)
+                db.log(email, "login:failed", f"bad password from {ip}")
             c.close()
-            return RedirectResponse("/login?error=nopassword", status_code=303)
+            return RedirectResponse(
+                "/login?error=password" if _auth.shared_password_configured()
+                else "/login?error=nopassword", status_code=303)
         c.close()
+
+    if not _auth.user_known(email):
+        _auth.note_login_failure(ip)
+        db.log(email, "login:refused", f"not on the user list, from {ip}")
+        return RedirectResponse("/login?error=notinvited", status_code=303)
+
+    # Name is optional once an account exists, so leaving it blank must not
+    # overwrite a stored name with the front of an email address.
+    if row and row["name"] and not name.strip():
+        name = row["name"]
 
     _auth.clear_login_failures(ip)
     request.session["user"] = {"email": email, "name": name.strip() or email.split("@")[0],
@@ -178,7 +183,8 @@ def account_password(request: Request, user=Depends(require_user)):
     row = c.execute("SELECT * FROM users WHERE lower(email)=lower(?)", (user["email"],)).fetchone()
     c.close()
     return templates.TemplateResponse(request, "account.html", {"user": user,
-        "mode": AUTH_MODE, "has_password": bool(row and row["pw_hash"]),
+        "mode": AUTH_MODE, "personal": _auth.personal_passwords_enabled(),
+        "has_password": bool(row and row["pw_hash"]),
         "must_change": bool(user.get("must_change")),
         "team_password_works": _auth.shared_password_configured(),
         "set_at": (row["pw_set_at"] if row else "") or "",
@@ -187,7 +193,7 @@ def account_password(request: Request, user=Depends(require_user)):
 @app.post("/account/password")
 def account_password_save(request: Request, current: str = Form(""), new: str = Form(...),
                           confirm: str = Form(""), user=Depends(require_user)):
-    if AUTH_MODE != "local":
+    if not _auth.personal_passwords_enabled():
         return RedirectResponse("/", status_code=303)
     c = db.conn()
     row = c.execute("SELECT * FROM users WHERE lower(email)=lower(?)", (user["email"],)).fetchone()

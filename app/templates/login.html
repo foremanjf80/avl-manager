@@ -16,14 +16,14 @@ admin to issue you a temporary one from the Admin page.</p>
 
 {% if mode in ('dev', 'shared', 'local') %}
 <form method="post" action="/login/dev">
-<label>Name <input name="name" {% if mode != 'local' %}required{% endif %}
-  {% if mode == 'local' %}placeholder="only needed the first time"{% endif %}></label>
+<label>Name <input name="name" {% if not personal %}required{% endif %}
+  {% if personal %}placeholder="only needed the first time"{% endif %}></label>
 <label>Email <input name="email" type="email" placeholder="you@{{ domain }}" required
   autocomplete="username"></label>
-{% if needs_password %}<label>{{ 'Password' if mode == 'local' and not bridge_open else 'Team password' }}
+{% if needs_password %}<label>{{ 'Team password' if bridge_open else 'Password' }}
   <input name="password" type="password" required autocomplete="current-password"></label>{% endif %}
 <button>Sign in</button></form>
-{% if mode == 'local' %}
+{% if personal %}
 {% if bridge_open %}
 <p class="hint">Use the team password as usual, or your own if you have set one. To set one, sign in
 and click <b>Password</b> at the top right &mdash; there is no rush, and the team password keeps
