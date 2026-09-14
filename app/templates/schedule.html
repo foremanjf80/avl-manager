@@ -1,7 +1,9 @@
 {% extends "base.html" %}{% block body %}
 <div class="row" style="justify-content:space-between;align-items:baseline">
 <h2>Schedule</h2>
-<a class="btn small ghost" href="/schedule/timeline?show={{ show }}&amp;avl={{ sel_a }}&amp;owner={{ sel_o }}">Timeline view</a></div>
+<span class="row">
+<a class="btn small ghost" href="/schedule/calendar">Calendar view</a>
+<a class="btn small ghost" href="/schedule/timeline?show={{ show }}&amp;avl={{ sel_a }}&amp;owner={{ sel_o }}">Timeline view</a></span></div>
 <p class="hint">What we have committed to, and by when. A commitment belongs to a product &times; TPO
 &mdash; several can be in flight at once &mdash; and is shown against what is actually outstanding, so a
 date can be read alongside the work behind it rather than on its own.</p>

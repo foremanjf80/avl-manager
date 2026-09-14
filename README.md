@@ -940,3 +940,28 @@ answer for it.
 "In play" is Listed, Listed Conditional, In Review, Execution, Engagement or
 Opportunity. Not the cold states, and not Pre-launch, which describes where a
 product is rather than anything happening at that financier.
+
+## v46 - A calendar, a one-save write-up, and a broken button found
+**Calendar** (`/schedule/calendar`), alongside the list and timeline: one month
+with committed dates, calls and actions that fall due. Whole weeks so the month
+never starts mid-row, today outlined, neighbouring days greyed, and anything met,
+held or closed faded rather than hidden. Requirement due dates are deliberately
+off it - dating a commitment's work sets fifty at once and they would bury the
+rest; those stay in the requirement queue.
+
+**Writing a call up no longer means doing it twice.** A scheduled call's first
+button is now **Write up**, which opens the editor with Held already chosen and
+the agenda you typed when scheduling still in the box. One save records the
+outcomes and closes it out. **Held** is still there for one that needs no notes.
+The topics field is labelled for both halves of its life: an agenda before,
+what was discussed after.
+
+**The Team panel is now "Who a call with each TPO could need"** - the outer
+bound, if one call covered everything in play. Most calls cover less and need
+fewer people; the exact list comes from the agenda when you schedule one.
+
+Fixed: `/schedule/{id}/status` had no handler since v38. Extracting a helper put
+it between the route decorator and the function it was meant to decorate, so
+FastAPI bound the route to the helper and the **Met** and **Missed** buttons on
+the Schedule page returned a validation error. Marking a commitment met from the
+list works again, including recording the pursuit's submitted date.

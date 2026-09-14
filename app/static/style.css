@@ -263,3 +263,23 @@ tr.editing td{background:#f4f8ff}
 .needbox .hint{align-self:center}
 table.cover td{vertical-align:top}
 table.cover .np{color:#444;font-size:13px}
+
+/* Month calendar. Plain table so it prints and needs no library; the day cell
+   is a fixed-height scroll box so one busy day cannot stretch a whole week. */
+table.cal{width:100%;border-collapse:collapse;table-layout:fixed;min-width:900px}
+table.cal th{background:var(--navy);color:#fff;font-size:13px;padding:5px 6px;text-align:left}
+table.cal td{border:1px solid #d8d8d8;vertical-align:top;padding:3px;height:104px;
+  max-width:0;overflow-y:auto}
+table.cal td.out{background:#f6f7f9}
+table.cal td.out .dnum{color:#8a8a8a}
+table.cal td.today{box-shadow:inset 0 0 0 2px var(--navy)}
+.cal .dnum{font-size:13px;font-weight:bold;color:#333;margin-bottom:2px}
+.cal .dnum .chip{background:var(--navy);color:#fff;font-size:10px;padding:1px 5px}
+.cal .ev{display:block;border-radius:3px;padding:2px 5px;margin-bottom:2px;
+  font-size:12px;line-height:1.3;text-decoration:none;color:#fff;overflow:hidden}
+.cal .ev b{display:block;font-weight:bold;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.cal .ev span{display:block;opacity:.92;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.ev-commitment{background:#2E5395}.ev-call{background:#1b7f6b}.ev-action{background:#9a5b1f}
+/* Done is still worth seeing, just not competing with what is still open. */
+.evs-Met,.evs-Held,.evs-Done,.evs-Closed,.evs-Cancelled{opacity:.45}
+.key{display:inline-block;width:22px;height:10px;border-radius:5px;vertical-align:middle}

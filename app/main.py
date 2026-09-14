@@ -569,7 +569,7 @@ def audit_redirect(request: Request):
 
 # ---------------- interaction log ----------------
 @app.get("/calls", response_class=HTMLResponse)
-def calls(request: Request, avl: int = 0, q: str = "", edit: int = 0,
+def calls(request: Request, avl: int = 0, q: str = "", edit: int = 0, held: int = 0,
           user=Depends(require_user)):
     c = db.conn()
     avls = c.execute("SELECT * FROM avls WHERE active=1 ORDER BY name").fetchall()
@@ -641,7 +641,7 @@ def calls(request: Request, avl: int = 0, q: str = "", edit: int = 0,
         "people": people, "contacts_by_avl": by_avl, "products": products,
         "prods_for": prods_for, "seats_by_avl": seats_by_avl, "reps_by_product": reps_by_product,
         "picked": picked, "call_types": db.CALL_TYPES, "statuses": db.CALL_STATUSES, "edit": edit,
-        "need_for": need_for, "default_status": "Held",
+        "need_for": need_for, "default_status": "Held", "held": held,
         "today": datetime.date.today().isoformat()})
 
 def _save_attendees(c, cid, qcells_person_ids, tpo_contact_ids, qcells_other, tpo_other):
@@ -3829,6 +3829,83 @@ def _timeline(rows, today=None):
             "ticks": ticks, "today": pct(now_d),
             "from": lo.isoformat(), "to": hi.isoformat()}
 
+def _month_bounds(month):
+    """(first, last, prev, next) for a YYYY-MM string, falling back to this month."""
+    try:
+        y, m = (int(x) for x in month.split("-"))
+        first = datetime.date(y, m, 1)
+    except (ValueError, AttributeError):
+        t = datetime.date.today()
+        first = datetime.date(t.year, t.month, 1)
+    nxt = datetime.date(first.year + (first.month == 12), first.month % 12 + 1, 1)
+    prv = datetime.date(first.year - (first.month == 1), (first.month - 2) % 12 + 1, 1)
+    return first, nxt - datetime.timedelta(days=1), prv, nxt
+
+def _calendar_entries(c, first, last):
+    """Everything dated in the window, keyed by day.
+
+    Three kinds share the grid because they are the three things a week is
+    actually made of here: what we promised, who we are speaking to, and what
+    somebody owes. Requirement due dates are deliberately left out - dating a
+    commitment's work can create fifty in one go, and they would bury the rest.
+    """
+    lo, hi = first.isoformat(), last.isoformat()
+    days = {}
+    def put(d, entry):
+        if d and lo <= d[:10] <= hi:
+            days.setdefault(d[:10], []).append(entry)
+
+    for r in c.execute(
+            "SELECT cm.*, a.name AS avl_name, p.name AS product FROM commitments cm "
+            "JOIN avls a ON a.id=cm.avl_id JOIN products p ON p.id=cm.product_id "
+            "WHERE cm.due_date BETWEEN ? AND ?", (lo, hi)):
+        put(r["due_date"], {"kind": "commitment", "status": r["status"],
+                            "title": r["kind"], "who": r["owner"] or "",
+                            "where": f"{r['avl_name']} / {r['product']}",
+                            "href": f"/pursuit/{r['avl_id']}/{r['product_id']}"})
+    for r in c.execute(
+            "SELECT calls.*, a.name AS avl_name FROM calls JOIN avls a ON a.id=calls.avl_id "
+            "WHERE calls.call_date BETWEEN ? AND ?", (lo, hi)):
+        put(r["call_date"], {"kind": "call", "status": r["status"],
+                             "title": f"{r['call_type']} call", "who": "",
+                             "where": r["avl_name"],
+                             "href": f"/calls?avl={r['avl_id']}&edit={r['id']}#edit"})
+    for r in c.execute(
+            "SELECT actions.*, a.name AS avl_name, p.name AS product FROM actions "
+            "LEFT JOIN avls a ON a.id=actions.avl_id LEFT JOIN products p ON p.id=actions.product_id "
+            "WHERE COALESCE(actions.due_date,'') BETWEEN ? AND ?", (lo, hi)):
+        where = " / ".join(x for x in (r["avl_name"], r["product"]) if x) or "General"
+        put(r["due_date"], {"kind": "action", "status": r["status"],
+                            "title": r["description"][:60], "who": r["owner"] or "",
+                            "where": where, "href": f"/actions?avl={r['avl_id'] or 0}"})
+    return days
+
+@app.get("/schedule/calendar", response_class=HTMLResponse)
+def schedule_calendar(request: Request, month: str = "", user=Depends(require_user)):
+    """One month, with commitments, calls and action due dates on it."""
+    first, last, prv, nxt = _month_bounds(month)
+    c = db.conn()
+    days = _calendar_entries(c, first, last)
+    c.close()
+    # Weeks run Sunday to Saturday, and the grid is padded out to whole weeks so
+    # the last few days of the previous month stay visible rather than the month
+    # starting mid-row.
+    start = first - datetime.timedelta(days=(first.weekday() + 1) % 7)
+    end = last + datetime.timedelta(days=(5 - last.weekday()) % 7)
+    weeks, cur = [], start
+    while cur <= end:
+        week = []
+        for _ in range(7):
+            week.append({"date": cur, "iso": cur.isoformat(), "inmonth": cur.month == first.month,
+                         "entries": days.get(cur.isoformat(), [])})
+            cur += datetime.timedelta(days=1)
+        weeks.append(week)
+    return templates.TemplateResponse(request, "calendar.html", {"user": user, "weeks": weeks,
+        "month_label": first.strftime("%B %Y"), "prev": prv.strftime("%Y-%m"),
+        "next": nxt.strftime("%Y-%m"), "this_month": datetime.date.today().strftime("%Y-%m"),
+        "today": datetime.date.today().isoformat(),
+        "n": sum(len(v) for v in days.values())})
+
 @app.get("/schedule/timeline", response_class=HTMLResponse)
 def schedule_timeline(request: Request, show: str = "open", avl: int = 0, owner: int = 0,
                       user=Depends(require_user)):
@@ -3912,7 +3989,6 @@ def commitment_save(cid: int, request: Request, due_date: str = Form(...),
            avl_id=row["avl_id"], product_id=row["product_id"], entity="commitment")
     return RedirectResponse(dest, status_code=303)
 
-@app.post("/schedule/{cid}/status")
 def _apply_commitment_status(c, row, status):
     """Set a commitment's status and the dates that follow from it.
 
@@ -3927,6 +4003,7 @@ def _apply_commitment_status(c, row, status):
         c.execute("UPDATE listings SET submitted_at=? WHERE avl_id=? AND product_id=? "
                   "AND COALESCE(submitted_at,'')=''", (met, row["avl_id"], row["product_id"]))
 
+@app.post("/schedule/{cid}/status")
 def commitment_status(cid: int, request: Request, status: str = Form(...),
                       next_url: str = Form(""), user=Depends(require_editor)):
     dest = next_url if next_url.startswith("/") else "/schedule"

@@ -2,7 +2,7 @@
 <div class="row" style="justify-content:space-between"><h2>Interaction Log</h2>
 <a class="btn small" href="/export/calls.csv">CSV</a></div>
 
-{% macro callform(action, r, pk, submit) %}
+{% macro callform(action, r, pk, submit, status_override=None) %}
 <form method="post" action="{{ action }}" class="callform">
 <div class="fgrid">
   <label>TPO AVL
@@ -13,7 +13,8 @@
   <label>Type
     <select name="call_type">{% for t in call_types %}<option {% if r and r.call_type==t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
   <label>Scheduled or held
-    <select name="status">{% for st in statuses %}<option {% if (r and r.status==st) or (not r and st==default_status) %}selected{% endif %}>{{ st }}</option>{% endfor %}</select></label>
+    {% set cur_status = status_override or (r.status if r else default_status) %}
+    <select name="status">{% for st in statuses %}<option {% if cur_status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select></label>
   <label>Owner / due
     <input name="owner_due" value="{{ r.owner_due if r else '' }}" placeholder="e.g. JF - 15 Sep"></label>
 </div>
@@ -40,8 +41,8 @@
     <span class="sub2">From the AVL's <a href="/contacts">contact list</a>.</span></label>
 </div>
 
-<label class="full">Topics covered
-  <textarea name="topics" rows="5" placeholder="What was discussed. One point per line works well.">{{ r.topics if r else '' }}</textarea></label>
+<label class="full">Agenda / topics covered
+  <textarea name="topics" rows="5" placeholder="Before the call, what it is for. Afterwards, what was discussed. One point per line works well.">{{ r.topics if r else '' }}</textarea></label>
 <label class="full">Outcomes / next steps
   <textarea name="outcomes" rows="5" placeholder="Decisions, commitments, who owes what.">{{ r.outcomes if r else '' }}</textarea></label>
 
@@ -64,10 +65,12 @@
   {% else %}<span class="hint">none named</span>{% endfor %}</td>
 <td class="sub2">{% for n in need_for.get(r.id, []) %}<span class="chip person">{{ n }}</span>{% else %}<span class="hint">nobody assigned</span>{% endfor %}</td>
 <td class="nowrap">
+  <a class="btn small" href="/calls?avl={{ sel }}&amp;edit={{ r.id }}&amp;held=1#edit"
+     title="Add the notes and close it out in one save">Write up</a>
   <form method="post" action="/calls/{{ r.id }}/status" class="inline">
   <input type="hidden" name="status" value="Held">
-  <input type="hidden" name="next_url" value="/calls?avl={{ sel }}"><button>Held</button></form>
-  <a class="btn small ghost" href="/calls?avl={{ sel }}&amp;edit={{ r.id }}#edit">Edit</a>
+  <input type="hidden" name="next_url" value="/calls?avl={{ sel }}">
+  <button class="btn small ghost" title="It happened, nothing to write up">Held</button></form>
   <form method="post" action="/calls/{{ r.id }}/status" class="inline">
   <input type="hidden" name="status" value="Cancelled">
   <input type="hidden" name="next_url" value="/calls?avl={{ sel }}"><button class="chipx" title="Cancel">&times;</button></form>
@@ -105,7 +108,9 @@ on <b>Held</b> to write up one that already did.</p>
 {% if edit == r.id %}
 <tr id="e{{ r.id }}"><td colspan="8" class="editcell">
 <div class="card" style="margin:0"><h3>Edit call &mdash; {{ r.avl_name }} {{ r.call_date }}</h3>
-{{ callform('/calls/' ~ r.id ~ '/save', r, picked[r.id], 'Save changes') }}</div></td></tr>
+{{ callform('/calls/' ~ r.id ~ '/save', r, picked[r.id],
+     'Save and mark held' if held and r.status == 'Scheduled' else 'Save changes',
+     'Held' if held and r.status == 'Scheduled' else None) }}</div></td></tr>
 {% endif %}
 {% else %}<tr><td colspan="8" class="hint">No calls logged{% if q %} matching "{{ q }}"{% endif %} yet.</td></tr>{% endfor %}
 </table>

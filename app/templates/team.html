@@ -32,12 +32,13 @@ product.</p>
 <button>Add</button></form>
 <p class="hint">Adding someone already retired brings them back rather than creating a duplicate.</p>
 
-<h3>Who a call with each TPO needs</h3>
-<p class="hint">The products in play at each account &mdash; listed there, or being worked towards a
-listing &mdash; and therefore who has to be on a call about them. The two account seats come from the
-TPO; the technical seats come from each product. Scheduling a call on
-<a href="/calls">Calls</a> works this out for the products you put on the agenda.</p>
-<table class="list cover"><tr><th>TPO AVL</th><th>Products in play</th><th>Needs</th></tr>
+<h3>Who a call with each TPO could need</h3>
+<p class="hint">Everything in play at each account &mdash; listed there, or being worked towards a
+listing &mdash; and who a call would need <b>if it covered all of it</b>. Most calls do not: one about
+two products needs the account seats plus those two products' reps, and no more. Scheduling a call on
+<a href="/calls">Calls</a> works out the exact list from the agenda you give it. Read this as the
+outer bound, and as a way to spot a product nobody can answer for.</p>
+<table class="list cover"><tr><th>TPO AVL</th><th>Products in play</th><th>Could need</th></tr>
 {% for cv in coverage %}<tr>
 <td><b>{{ cv.avl.name }}</b>
   <div class="np">{% for s in cv.seats %}{{ s.name }} &middot; {{ s.role }}<br>{% else %}no account seat{% endfor %}</div></td>
@@ -45,7 +46,9 @@ TPO; the technical seats come from each product. Scheduling a call on
     <span class="ls ls-{{ p.status|replace(' ','')|replace(',','')|replace('/','') }}">{{ p.status }}</span>
     {% if not p.reps %}<span class="np">&mdash; no product rep</span>{% endif %}</div>
   {% else %}<span class="hint">nothing listed or in pursuit</span>{% endfor %}</td>
-<td>{% for n in cv.need %}<span class="chip person">{{ n.name }}</span>{% else %}<span class="hint">nobody</span>{% endfor %}</td>
+<td>{% for n in cv.need %}<span class="chip person">{{ n.name }}</span>{% else %}<span class="hint">nobody</span>{% endfor %}
+  {% if cv.need|length > 3 %}<div class="np">{{ cv.need|length }} people if one call covered
+  everything</div>{% endif %}</td>
 </tr>{% endfor %}</table>
 <p class="hint">A product with no rep is the gap worth closing &mdash; that call has nobody who can
 answer for it. Set them on <a href="/manage">Manage</a>.</p></div>
