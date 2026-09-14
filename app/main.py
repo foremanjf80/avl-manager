@@ -584,6 +584,12 @@ def calls(request: Request, avl: int = 0, q: str = "", edit: int = 0,
                 "OR qcells_attendees LIKE ? OR tpo_attendees LIKE ?) ")
         params += [f"%{q.strip()}%"] * 5
     rows = c.execute(sql + "ORDER BY call_date DESC, calls.id DESC LIMIT 300", params).fetchall()
+    # Arranged calls read forwards - the next one first - and logged ones read
+    # backwards. Same table, opposite order, because they answer opposite
+    # questions: what is coming, and what happened.
+    upcoming = sorted([r for r in rows if r["status"] == "Scheduled"],
+                      key=lambda r: (r["call_date"], r["id"]))
+    logged = [r for r in rows if r["status"] != "Scheduled"]
     # What each logged call already has selected, so the edit form comes up filled in.
     picked = {r["id"]: {"qcells": [], "tpo": [], "other_q": [], "other_t": []} for r in rows}
     if rows:
@@ -597,6 +603,33 @@ def calls(request: Request, avl: int = 0, q: str = "", edit: int = 0,
                 pk["tpo"].append(at["contact_id"])
             else:
                 pk["other_q" if at["side"] == "qcells" else "other_t"].append(at["name"])
+    # Which products each call is about, so the edit form comes up filled in.
+    prods_for = {r["id"]: [] for r in rows}
+    if rows:
+        qs = ",".join("?" * len(rows))
+        for cp in c.execute(f"SELECT cp.call_id, cp.product_id, p.name FROM call_products cp "
+                            f"JOIN products p ON p.id=cp.product_id WHERE cp.call_id IN ({qs}) "
+                            f"ORDER BY p.name", [r["id"] for r in rows]):
+            prods_for[cp["call_id"]].append({"id": cp["product_id"], "name": cp["name"]})
+    products = c.execute("SELECT id, name, category FROM products WHERE active=1 "
+                         "ORDER BY category, name").fetchall()
+    # The two lookups the "who is needed" panel runs on, so picking a TPO and a
+    # product answers it without a round trip.
+    seats_by_avl, reps_by_product = {}, {}
+    for r in c.execute("SELECT a.avl_id, a.product_id, a.role, p.id AS pid, p.name "
+                       "FROM assignments a JOIN people p ON p.id=a.person_id "
+                       "WHERE a.ended_at IS NULL ORDER BY p.name"):
+        who = {"id": r["pid"], "name": r["name"], "role": r["role"].split(" (")[0]}
+        if r["product_id"]:
+            reps_by_product.setdefault(str(r["product_id"]), []).append(who)
+        elif r["avl_id"]:
+            seats_by_avl.setdefault(str(r["avl_id"]), []).append(who)
+    # For calls still to happen, who the agenda says has to be on them. Worked
+    # out here rather than in the template so the rule lives in one place.
+    need_for = {}
+    for r in upcoming:
+        rost = db.call_roster(c, r["avl_id"], [p["id"] for p in prods_for.get(r["id"], [])])
+        need_for[r["id"]] = [n["name"] for n in rost["need"]]
     # avl -> its active contacts, driving the TPO attendee picker
     by_avl = {}
     for ct in c.execute("SELECT id, avl_id, name, role FROM contacts WHERE active=1 ORDER BY name"):
@@ -604,29 +637,44 @@ def calls(request: Request, avl: int = 0, q: str = "", edit: int = 0,
             {"id": ct["id"], "name": ct["name"], "role": ct["role"]})
     c.close()
     return templates.TemplateResponse(request, "calls.html", {"user": user, "avls": avls,
-        "rows": rows, "sel": avl, "q": q, "people": people, "contacts_by_avl": by_avl,
-        "picked": picked, "call_types": db.CALL_TYPES, "edit": edit,
+        "rows": rows, "upcoming": upcoming, "logged": logged, "sel": avl, "q": q,
+        "people": people, "contacts_by_avl": by_avl, "products": products,
+        "prods_for": prods_for, "seats_by_avl": seats_by_avl, "reps_by_product": reps_by_product,
+        "picked": picked, "call_types": db.CALL_TYPES, "statuses": db.CALL_STATUSES, "edit": edit,
+        "need_for": need_for, "default_status": "Held",
         "today": datetime.date.today().isoformat()})
 
 def _save_attendees(c, cid, qcells_person_ids, tpo_contact_ids, qcells_other, tpo_other):
     db.set_call_attendees(c, cid, "qcells", person_ids=qcells_person_ids, other=qcells_other)
     db.set_call_attendees(c, cid, "tpo", contact_ids=tpo_contact_ids, other=tpo_other)
 
+def _save_call_products(c, cid, product_ids):
+    """Replace the products on a call's agenda."""
+    c.execute("DELETE FROM call_products WHERE call_id=?", (cid,))
+    for pid in {int(p) for p in product_ids if str(p).strip().isdigit()}:
+        if c.execute("SELECT 1 FROM products WHERE id=?", (pid,)).fetchone():
+            c.execute("INSERT OR IGNORE INTO call_products(call_id, product_id) VALUES(?,?)",
+                      (cid, pid))
+
 @app.post("/calls/add")
 def add_call(request: Request, avl_id: int = Form(...), call_date: str = Form(...),
-             call_type: str = Form("Joint"),
+             call_type: str = Form("Joint"), status: str = Form("Held"),
              qcells_person_ids: list[int] = Form(default=[]),
              tpo_contact_ids: list[int] = Form(default=[]),
+             product_ids: list[int] = Form(default=[]),
              qcells_other: str = Form(""), tpo_other: str = Form(""),
              topics: str = Form(""), outcomes: str = Form(""),
              owner_due: str = Form(""), user=Depends(require_editor)):
+    if status not in db.CALL_STATUSES:
+        status = "Held"
     c = db.conn()
-    c.execute("INSERT INTO calls(avl_id, call_date, call_type, topics, outcomes, owner_due, "
-              "created_by, created_at) VALUES(?,?,?,?,?,?,?,?)",
-              (avl_id, call_date, call_type, topics.strip(), outcomes.strip(),
+    c.execute("INSERT INTO calls(avl_id, call_date, call_type, status, topics, outcomes, owner_due, "
+              "created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+              (avl_id, call_date, call_type, status, topics.strip(), outcomes.strip(),
                owner_due.strip(), user["email"], now()))
     cid = c.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
     _save_attendees(c, cid, qcells_person_ids, tpo_contact_ids, qcells_other, tpo_other)
+    _save_call_products(c, cid, product_ids)
     aname = c.execute("SELECT name FROM avls WHERE id=?", (avl_id,)).fetchone()["name"]
     c.commit(); c.close()
     db.log(user["email"], "call:add", f"{call_date} ({call_type})",
@@ -635,24 +683,46 @@ def add_call(request: Request, avl_id: int = Form(...), call_date: str = Form(..
 
 @app.post("/calls/{cid}/save")
 def save_call(cid: int, request: Request, avl_id: int = Form(...), call_date: str = Form(...),
-              call_type: str = Form("Joint"),
+              call_type: str = Form("Joint"), status: str = Form("Held"),
               qcells_person_ids: list[int] = Form(default=[]),
               tpo_contact_ids: list[int] = Form(default=[]),
+              product_ids: list[int] = Form(default=[]),
               qcells_other: str = Form(""), tpo_other: str = Form(""),
               topics: str = Form(""), outcomes: str = Form(""),
               owner_due: str = Form(""), user=Depends(require_editor)):
+    if status not in db.CALL_STATUSES:
+        status = "Held"
     c = db.conn()
     if not c.execute("SELECT 1 FROM calls WHERE id=?", (cid,)).fetchone():
         c.close()
         return RedirectResponse("/calls", status_code=303)
-    c.execute("UPDATE calls SET avl_id=?, call_date=?, call_type=?, topics=?, outcomes=?, "
-              "owner_due=? WHERE id=?", (avl_id, call_date, call_type, topics.strip(),
+    c.execute("UPDATE calls SET avl_id=?, call_date=?, call_type=?, status=?, topics=?, outcomes=?, "
+              "owner_due=? WHERE id=?", (avl_id, call_date, call_type, status, topics.strip(),
                                          outcomes.strip(), owner_due.strip(), cid))
     _save_attendees(c, cid, qcells_person_ids, tpo_contact_ids, qcells_other, tpo_other)
+    _save_call_products(c, cid, product_ids)
     aname = c.execute("SELECT name FROM avls WHERE id=?", (avl_id,)).fetchone()["name"]
     c.commit(); c.close()
     db.log(user["email"], "call:save", f"{call_date}", avl_id=avl_id, entity="call", entity_id=cid)
     return RedirectResponse(f"/calls?avl={avl_id}", status_code=303)
+
+@app.post("/calls/{cid}/status")
+def call_status(cid: int, request: Request, status: str = Form(...),
+                next_url: str = Form(""), user=Depends(require_editor)):
+    """Move an arranged call to held or cancelled without opening the editor."""
+    dest = next_url if next_url.startswith("/") else "/calls"
+    if status not in db.CALL_STATUSES:
+        return RedirectResponse(dest, status_code=303)
+    c = db.conn()
+    row = c.execute("SELECT avl_id, call_date FROM calls WHERE id=?", (cid,)).fetchone()
+    if not row:
+        c.close()
+        return RedirectResponse(dest, status_code=303)
+    c.execute("UPDATE calls SET status=? WHERE id=?", (status, cid))
+    c.commit(); c.close()
+    db.log(user["email"], "call:status", f"{row['call_date']} -> {status}",
+           avl_id=row["avl_id"], entity="call", entity_id=cid)
+    return RedirectResponse(dest, status_code=303)
 
 @app.post("/calls/{cid}/delete")
 def delete_call(cid: int, request: Request, user=Depends(require_editor)):
@@ -745,11 +815,12 @@ def team(request: Request, user=Depends(require_user)):
     n_unseated = sum(1 for a in avls
                      if not any(r["avl_name"] == a["name"]
                                 and db.ROLE_SCOPE.get(r["role"]) == "avl" for r in current))
+    coverage = db.avl_coverage(c)
     c.close()
     return templates.TemplateResponse(request, "team.html", {"user": user, "people": people,
         "active_people": active_people, "load": load,
         "avls": avls, "products": products, "current": current, "past": past,
-        "roles": db.ROLES, "n_unseated": n_unseated, "orgs": orgs})
+        "roles": db.ROLES, "n_unseated": n_unseated, "orgs": orgs, "coverage": coverage})
 
 def _org_value(org, org_other):
     """"Other" is a prompt to define the team, not a bucket to file people in."""

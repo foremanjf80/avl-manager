@@ -30,7 +30,25 @@ product.</p>
 <select name="org" class="orgpick">{% for o in orgs %}<option>{{ o }}</option>{% endfor %}</select>
 <input name="org_other" class="orgother" placeholder="Define the team" size="18" style="display:none">
 <button>Add</button></form>
-<p class="hint">Adding someone already retired brings them back rather than creating a duplicate.</p></div>
+<p class="hint">Adding someone already retired brings them back rather than creating a duplicate.</p>
+
+<h3>Who a call with each TPO needs</h3>
+<p class="hint">The products in play at each account &mdash; listed there, or being worked towards a
+listing &mdash; and therefore who has to be on a call about them. The two account seats come from the
+TPO; the technical seats come from each product. Scheduling a call on
+<a href="/calls">Calls</a> works this out for the products you put on the agenda.</p>
+<table class="list cover"><tr><th>TPO AVL</th><th>Products in play</th><th>Needs</th></tr>
+{% for cv in coverage %}<tr>
+<td><b>{{ cv.avl.name }}</b>
+  <div class="np">{% for s in cv.seats %}{{ s.name }} &middot; {{ s.role }}<br>{% else %}no account seat{% endfor %}</div></td>
+<td>{% for p in cv.products %}<div>{{ p.name }}
+    <span class="ls ls-{{ p.status|replace(' ','')|replace(',','')|replace('/','') }}">{{ p.status }}</span>
+    {% if not p.reps %}<span class="np">&mdash; no product rep</span>{% endif %}</div>
+  {% else %}<span class="hint">nothing listed or in pursuit</span>{% endfor %}</td>
+<td>{% for n in cv.need %}<span class="chip person">{{ n.name }}</span>{% else %}<span class="hint">nobody</span>{% endfor %}</td>
+</tr>{% endfor %}</table>
+<p class="hint">A product with no rep is the gap worth closing &mdash; that call has nobody who can
+answer for it. Set them on <a href="/manage">Manage</a>.</p></div>
 
 <div class="card"><h3>Roster</h3>
 <table class="list"><tr><th>Name</th><th>Email</th><th>Org</th><th>Live seats</th><th></th><th></th></tr>

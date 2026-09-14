@@ -12,8 +12,21 @@
     <input name="call_date" type="date" value="{{ r.call_date if r else today }}" required></label>
   <label>Type
     <select name="call_type">{% for t in call_types %}<option {% if r and r.call_type==t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
+  <label>Scheduled or held
+    <select name="status">{% for st in statuses %}<option {% if (r and r.status==st) or (not r and st==default_status) %}selected{% endif %}>{{ st }}</option>{% endfor %}</select></label>
   <label>Owner / due
     <input name="owner_due" value="{{ r.owner_due if r else '' }}" placeholder="e.g. JF - 15 Sep"></label>
+</div>
+
+<div class="fgrid2">
+  <label>Products on the agenda
+    <select name="product_ids" class="prodpick" multiple size="5">{% for p in products %}<option value="{{ p.id }}"
+      {% if r and p.id in prods_for.get(r.id, [])|map(attribute='id')|list %}selected{% endif %}>{{ p.name }} &mdash; {{ p.category }}</option>{% endfor %}</select>
+    <span class="sub2">Which products this call is about. It decides which product reps need to be
+    on it &mdash; the account seats come from the TPO.</span></label>
+  <label>Who this call needs
+    <div class="needbox"><span class="hint">Pick a TPO and the products above.</span></div>
+    <button type="button" class="btn small ghost addneed">Add them to Qcells attendees</button></label>
 </div>
 
 <div class="fgrid2">
@@ -35,11 +48,36 @@
 <div class="row"><button>{{ submit }}</button>
 {% if r %}<a href="/calls?avl={{ sel }}" class="sub2" style="align-self:center">Cancel</a>{% endif %}</div>
 <script type="application/json" class="preselect">{{ (pk.tpo if pk else [])|tojson }}</script>
+<script type="application/json" class="seats">{{ seats_by_avl|tojson }}</script>
+<script type="application/json" class="reps">{{ reps_by_product|tojson }}</script>
 </form>
 {% endmacro %}
 
-<div class="card"><h3>Log a call</h3>
-{{ callform('/calls/add', None, None, 'Log call') }}</div>
+{% if upcoming %}
+<div class="card"><h3>Coming up</h3>
+<table class="list"><tr><th>Date</th><th>TPO</th><th>Type</th><th>Products</th><th>Who is needed</th><th></th></tr>
+{% for r in upcoming %}<tr>
+<td class="nowrap"><b>{{ r.call_date }}</b>
+  {% if r.call_date < today %}<div><span class="due due-over">date passed</span></div>{% endif %}</td>
+<td><b>{{ r.avl_name }}</b></td><td class="sub2">{{ r.call_type }}</td>
+<td class="sub2">{% for p in prods_for.get(r.id, []) %}{{ p.name }}{% if not loop.last %}, {% endif %}
+  {% else %}<span class="hint">none named</span>{% endfor %}</td>
+<td class="sub2">{% for n in need_for.get(r.id, []) %}<span class="chip person">{{ n }}</span>{% else %}<span class="hint">nobody assigned</span>{% endfor %}</td>
+<td class="nowrap">
+  <form method="post" action="/calls/{{ r.id }}/status" class="inline">
+  <input type="hidden" name="status" value="Held">
+  <input type="hidden" name="next_url" value="/calls?avl={{ sel }}"><button>Held</button></form>
+  <a class="btn small ghost" href="/calls?avl={{ sel }}&amp;edit={{ r.id }}#edit">Edit</a>
+  <form method="post" action="/calls/{{ r.id }}/status" class="inline">
+  <input type="hidden" name="status" value="Cancelled">
+  <input type="hidden" name="next_url" value="/calls?avl={{ sel }}"><button class="chipx" title="Cancel">&times;</button></form>
+</td></tr>{% endfor %}</table></div>
+{% endif %}
+
+<div class="card"><h3>Schedule or log a call</h3>
+<p class="hint">Set <b>Scheduled</b> for one still to happen and it appears under Coming up; leave it
+on <b>Held</b> to write up one that already did.</p>
+{{ callform('/calls/add', None, None, 'Save call') }}</div>
 
 <form method="get" action="/calls" class="row" style="margin:8px 0">
 <select name="avl" onchange="this.form.submit()"><option value="0">All TPOs</option>
@@ -98,6 +136,43 @@ document.querySelectorAll('form.callform').forEach(f => {
   }
   avlSel.addEventListener('change', () => fill(false));
   fill(true);
+
+  // Who the call needs, recomputed as the TPO and the products change. The two
+  // halves come from different places on purpose: the account seats belong to
+  // the financier, the technical seats to each product on the agenda.
+  const seats = JSON.parse(f.querySelector('.seats').textContent || '{}');
+  const reps = JSON.parse(f.querySelector('.reps').textContent || '{}');
+  const prodSel = f.querySelector('.prodpick'), box = f.querySelector('.needbox');
+  function needed() {
+    const out = new Map();
+    (seats[avlSel.value] || []).forEach(p => out.set(p.id, p));
+    Array.from(prodSel.selectedOptions).forEach(o =>
+      (reps[o.value] || []).forEach(p => out.set(p.id, p)));
+    return [...out.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
+  function render() {
+    const list = needed();
+    box.innerHTML = '';
+    if (!list.length) {
+      box.innerHTML = '<span class="hint">Nobody is assigned to this TPO or these products yet '
+        + '&mdash; set the seats on <a href="/manage">Manage</a>.</span>';
+      return;
+    }
+    list.forEach(p => {
+      const el = document.createElement('span');
+      el.className = 'chip person';
+      el.textContent = p.name + (p.role ? ' \u00b7 ' + p.role : '');
+      box.appendChild(el);
+    });
+  }
+  avlSel.addEventListener('change', render);
+  prodSel.addEventListener('change', render);
+  f.querySelector('.addneed').addEventListener('click', () => {
+    const want = new Set(needed().map(p => String(p.id)));
+    Array.from(f.querySelector('[name=qcells_person_ids]').options)
+         .forEach(o => { if (want.has(o.value)) o.selected = true; });
+  });
+  render();
 });
 </script>
 {% endblock %}

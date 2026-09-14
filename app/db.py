@@ -341,6 +341,15 @@ def _migrate(c):
     # the algorithm that produced them, so the cost parameters can be raised
     # later without invalidating anybody's password. Nothing here is reversible:
     # a forgotten password is replaced by an admin, never recovered.
+    # A call used to be something you wrote down afterwards. Now it can also be
+    # something you arrange, so it needs to say which it is. Everything already
+    # logged had happened, hence Held rather than a nullable column.
+    cl = [r[1] for r in c.execute("PRAGMA table_info(calls)")]
+    if cl and "status" not in cl:
+        c.execute("ALTER TABLE calls ADD COLUMN status TEXT DEFAULT 'Held'")
+        c.execute("UPDATE calls SET status='Held' WHERE COALESCE(status,'')=''")
+        c.commit()
+
     us = [r[1] for r in c.execute("PRAGMA table_info(users)")]
     if us and "pw_hash" not in us:
         for col, ddl in (("pw_hash", "TEXT DEFAULT ''"), ("pw_salt", "TEXT DEFAULT ''"),
@@ -558,6 +567,15 @@ CREATE TABLE IF NOT EXISTS packages(
   bytes INTEGER DEFAULT 0, stored_path TEXT DEFAULT '', manifest TEXT DEFAULT '',
   created_by TEXT, created_at TEXT);
 CREATE INDEX IF NOT EXISTS ix_packages_pa ON packages(product_id, avl_id);
+-- Which products a call is about. A call is scheduled against a TPO, but who
+-- needs to be in the room is decided by the products on the agenda: the account
+-- seats belong to the TPO, the technical seats belong to each product.
+CREATE TABLE IF NOT EXISTS call_products(
+  call_id INTEGER NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  PRIMARY KEY (call_id, product_id));
+CREATE INDEX IF NOT EXISTS ix_call_prod ON call_products(product_id);
+
 CREATE TABLE IF NOT EXISTS call_attendees(
   id INTEGER PRIMARY KEY,
   call_id INTEGER NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
@@ -821,6 +839,67 @@ def scope_filter(scope):
 # free-text field for one-off guests. The names stay denormalised onto calls so
 # the CSV export and weekly digest keep working unchanged.
 CALL_TYPES = ["Joint", "Technical", "Commercial", "Intro", "QBR", "Escalation", "Site visit"]
+
+# A call is either still to happen or has happened. Everything logged before this
+# existed had already happened, which is why Held is the default.
+CALL_STATUSES = ["Scheduled", "Held", "Cancelled"]
+
+# On the table at a TPO: already listed there, or actively being worked towards a
+# listing. Not the cold states, and not Pre-launch - that describes where the
+# product is, not anything happening at that financier.
+IN_PLAY_STATUSES = ("Listed", "Listed, Conditional", "In Review", "Execution",
+                    "Engagement", "Opportunity")
+
+def call_roster(c, avl_id, product_ids=()):
+    """Who a call with this TPO about these products needs in the room.
+
+    The two account seats come from the TPO, because they are a relationship
+    with the financier. The technical seats come from each product on the
+    agenda, because that is where product expertise is held. Returns the account
+    seats, a line per product, and the deduplicated list of people.
+    """
+    seats, need = [], {}
+    for r in c.execute(
+            "SELECT p.id, p.name, a.role FROM assignments a JOIN people p ON p.id=a.person_id "
+            "WHERE a.avl_id=? AND a.product_id IS NULL AND a.ended_at IS NULL "
+            "ORDER BY a.role, p.name", (avl_id,)):
+        seats.append({"id": r["id"], "name": r["name"], "role": r["role"].split(" (")[0]})
+        need[r["id"]] = r["name"]
+    products = []
+    for pid in product_ids:
+        row = c.execute("SELECT name FROM products WHERE id=?", (pid,)).fetchone()
+        if not row:
+            continue
+        reps = c.execute(
+            "SELECT DISTINCT p.id, p.name FROM assignments a JOIN people p ON p.id=a.person_id "
+            "WHERE a.product_id=? AND a.ended_at IS NULL AND (a.avl_id IS NULL OR a.avl_id=?) "
+            "ORDER BY p.name", (pid, avl_id)).fetchall()
+        products.append({"id": pid, "name": row["name"],
+                         "reps": [{"id": r["id"], "name": r["name"]} for r in reps]})
+        for r in reps:
+            need[r["id"]] = r["name"]
+    return {"seats": seats, "products": products,
+            "need": [{"id": k, "name": v} for k, v in sorted(need.items(), key=lambda kv: kv[1])]}
+
+def avl_coverage(c):
+    """Per TPO: the products in play there, and who would have to join a call.
+
+    Answers the question Manage cannot, because Manage shows a seat against one
+    product or one account at a time and this is the intersection of both.
+    """
+    out = []
+    for a in c.execute("SELECT id, name FROM avls WHERE active=1 ORDER BY name"):
+        qs = ",".join("?" * len(IN_PLAY_STATUSES))
+        rows = c.execute(
+            f"SELECT p.id, p.name, l.status FROM listings l JOIN products p ON p.id=l.product_id "
+            f"WHERE l.avl_id=? AND l.status IN ({qs}) AND p.active=1 "
+            f"ORDER BY p.category, p.name", [a["id"], *IN_PLAY_STATUSES]).fetchall()
+        rost = call_roster(c, a["id"], [r["id"] for r in rows])
+        out.append({"avl": dict(a), "seats": rost["seats"], "need": rost["need"],
+                    "products": [{"name": r["name"], "status": r["status"],
+                                  "reps": [x["name"] for x in prod["reps"]]}
+                                 for r, prod in zip(rows, rost["products"])]})
+    return out
 
 def call_attendees(c, call_id):
     rows = c.execute("SELECT * FROM call_attendees WHERE call_id=? ORDER BY side, name",

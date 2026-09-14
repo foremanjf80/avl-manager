@@ -917,3 +917,26 @@ column. The grid already scrolls horizontally.
 
 It is still a dropdown: hover lightens the cell, keyboard focus draws an outline,
 and changing it still saves immediately.
+
+## v45 - Calls you arrange, and who has to be on them
+A call was something you wrote up afterwards. It can now also be something you
+arrange: **Scheduled / Held / Cancelled**, with arranged ones gathered under
+**Coming up** at the top of the page, soonest first, and a date that has gone by
+called out rather than quietly hidden. **Held** and **×** close one out without
+opening the editor. Everything logged before this existed is Held.
+
+A call also names **the products on its agenda**, which is what decides who needs
+to be on it. The two account seats come from the TPO, because they are a
+relationship with the financier; the technical seats come from each product,
+because that is where product expertise sits. The form works this out live as you
+pick, and **Add them to Qcells attendees** selects them in one go.
+
+Team gains **Who a call with each TPO needs**: per account, the products in play
+there - listed, or being worked towards a listing - with their reps and the
+deduplicated list of people a call would need. A product with nobody on it says
+so, because that is the gap worth closing: a call about it has nobody who can
+answer for it.
+
+"In play" is Listed, Listed Conditional, In Review, Execution, Engagement or
+Opportunity. Not the cold states, and not Pre-launch, which describes where a
+product is rather than anything happening at that financier.
