@@ -942,7 +942,7 @@ Opportunity. Not the cold states, and not Pre-launch, which describes where a
 product is rather than anything happening at that financier.
 
 ## v46 - A calendar, a one-save write-up, and a broken button found
-**Calendar** (`/schedule/calendar`), alongside the list and timeline: one month
+**Calendar**, on the Schedule page itself, under the commit form: one month
 with committed dates, calls and actions that fall due. Whole weeks so the month
 never starts mid-row, today outlined, neighbouring days greyed, and anything met,
 held or closed faded rather than hidden. Requirement due dates are deliberately
@@ -965,3 +965,15 @@ it between the route decorator and the function it was meant to decorate, so
 FastAPI bound the route to the helper and the **Met** and **Missed** buttons on
 the Schedule page returned a validation error. Marking a commitment met from the
 list works again, including recording the pursuit's submitted date.
+
+## v47 - The calendar belongs on the Schedule page
+It was a button leading to a page of its own, which is not where it was wanted
+and not where it belongs: the list says what we have promised, the month says
+what the next few weeks actually look like, and those are two halves of one
+question. The grid now sits under the commit form, filling the space that was
+empty, and the separate page is gone rather than kept as a second copy.
+
+Month navigation stays on the page and returns to the calendar rather than the
+top of it. The grid follows the **TPO filter** above it, so narrowing to one
+account narrows the month too - but not the status or owner filters, which
+describe commitments, while the grid also carries calls and actions.

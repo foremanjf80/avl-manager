@@ -1,9 +1,7 @@
 {% extends "base.html" %}{% block body %}
 <div class="row" style="justify-content:space-between;align-items:baseline">
 <h2>Schedule timeline</h2>
-<span class="row">
-<a class="btn small ghost" href="/schedule/calendar">Calendar view</a>
-<a class="btn small ghost" href="/schedule?show={{ show }}&amp;avl={{ sel_a }}&amp;owner={{ sel_o }}">List view</a></span>
+<a class="btn small ghost" href="/schedule?show={{ show }}&amp;avl={{ sel_a }}&amp;owner={{ sel_o }}">List and calendar</a>
 </div>
 <p class="hint">Every commitment on one date axis, grouped by TPO and product. A bar runs from the day
 we made the commitment to the day it falls due &mdash; the run-up, which is the part still worth acting

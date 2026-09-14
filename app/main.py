@@ -3746,7 +3746,7 @@ def _commitment_rows(c, where="", args=(), limit=300):
 
 @app.get("/schedule", response_class=HTMLResponse)
 def schedule(request: Request, show: str = "open", avl: int = 0, owner: int = 0,
-             edit: int = 0, user=Depends(require_user)):
+             edit: int = 0, month: str = "", user=Depends(require_user)):
     c = db.conn()
     where, args = "WHERE 1=1 ", []
     if show == "open":
@@ -3762,6 +3762,12 @@ def schedule(request: Request, show: str = "open", avl: int = 0, owner: int = 0,
     products = c.execute("SELECT id, name, category FROM products WHERE active=1 "
                          "ORDER BY category, name").fetchall()
     people = c.execute("SELECT id, name FROM people WHERE active=1 ORDER BY name").fetchall()
+    # The calendar sits on this page rather than behind a link: the list answers
+    # "what have we promised", and the month answers "what does the next few
+    # weeks actually look like". They belong together. It follows the TPO filter
+    # above it, but not the status or owner ones - those are about commitments,
+    # and the grid also carries calls and actions.
+    cal = _calendar_month(c, month, avl)
     c.close()
     tot = {"open": sum(1 for r in rows if r["c"]["status"] == "Planned"),
            "overdue": sum(1 for r in rows if r["state"] == "overdue"),
@@ -3770,7 +3776,7 @@ def schedule(request: Request, show: str = "open", avl: int = 0, owner: int = 0,
                            and not r["rd"]["ready"])}
     return templates.TemplateResponse(request, "schedule.html", {"user": user, "rows": rows,
         "avls": avls, "products": products, "people": people, "show": show, "sel_a": avl,
-        "sel_o": owner, "tot": tot, "kinds": db.COMMITMENT_KINDS, "edit": edit,
+        "sel_o": owner, "tot": tot, "kinds": db.COMMITMENT_KINDS, "edit": edit, "cal": cal,
         "statuses": db.COMMITMENT_STATUSES, "today": datetime.date.today().isoformat(),
         "risk_days": db.AT_RISK_DAYS})
 
@@ -3841,7 +3847,7 @@ def _month_bounds(month):
     prv = datetime.date(first.year - (first.month == 1), (first.month - 2) % 12 + 1, 1)
     return first, nxt - datetime.timedelta(days=1), prv, nxt
 
-def _calendar_entries(c, first, last):
+def _calendar_entries(c, first, last, avl=0):
     """Everything dated in the window, keyed by day.
 
     Three kinds share the grid because they are the three things a week is
@@ -3858,14 +3864,16 @@ def _calendar_entries(c, first, last):
     for r in c.execute(
             "SELECT cm.*, a.name AS avl_name, p.name AS product FROM commitments cm "
             "JOIN avls a ON a.id=cm.avl_id JOIN products p ON p.id=cm.product_id "
-            "WHERE cm.due_date BETWEEN ? AND ?", (lo, hi)):
+            "WHERE cm.due_date BETWEEN ? AND ? " + (f"AND cm.avl_id={int(avl)} " if avl else ""),
+            (lo, hi)):
         put(r["due_date"], {"kind": "commitment", "status": r["status"],
                             "title": r["kind"], "who": r["owner"] or "",
                             "where": f"{r['avl_name']} / {r['product']}",
                             "href": f"/pursuit/{r['avl_id']}/{r['product_id']}"})
     for r in c.execute(
             "SELECT calls.*, a.name AS avl_name FROM calls JOIN avls a ON a.id=calls.avl_id "
-            "WHERE calls.call_date BETWEEN ? AND ?", (lo, hi)):
+            "WHERE calls.call_date BETWEEN ? AND ? " + (f"AND calls.avl_id={int(avl)} " if avl else ""),
+            (lo, hi)):
         put(r["call_date"], {"kind": "call", "status": r["status"],
                              "title": f"{r['call_type']} call", "who": "",
                              "where": r["avl_name"],
@@ -3873,26 +3881,25 @@ def _calendar_entries(c, first, last):
     for r in c.execute(
             "SELECT actions.*, a.name AS avl_name, p.name AS product FROM actions "
             "LEFT JOIN avls a ON a.id=actions.avl_id LEFT JOIN products p ON p.id=actions.product_id "
-            "WHERE COALESCE(actions.due_date,'') BETWEEN ? AND ?", (lo, hi)):
+            "WHERE COALESCE(actions.due_date,'') BETWEEN ? AND ? "
+            + (f"AND actions.avl_id={int(avl)} " if avl else ""), (lo, hi)):
         where = " / ".join(x for x in (r["avl_name"], r["product"]) if x) or "General"
         put(r["due_date"], {"kind": "action", "status": r["status"],
                             "title": r["description"][:60], "who": r["owner"] or "",
                             "where": where, "href": f"/actions?avl={r['avl_id'] or 0}"})
     return days
 
-@app.get("/schedule/calendar", response_class=HTMLResponse)
-def schedule_calendar(request: Request, month: str = "", user=Depends(require_user)):
-    """One month, with commitments, calls and action due dates on it."""
+def _calendar_month(c, month, avl=0):
+    """A month of weeks, each day carrying what falls on it.
+
+    Weeks run Sunday to Saturday and the grid is padded to whole weeks, so a
+    month never starts mid-row and the days either side of it stay visible.
+    """
     first, last, prv, nxt = _month_bounds(month)
-    c = db.conn()
-    days = _calendar_entries(c, first, last)
-    c.close()
-    # Weeks run Sunday to Saturday, and the grid is padded out to whole weeks so
-    # the last few days of the previous month stay visible rather than the month
-    # starting mid-row.
-    start = first - datetime.timedelta(days=(first.weekday() + 1) % 7)
+    days = _calendar_entries(c, first, last, avl)
+    cur = first - datetime.timedelta(days=(first.weekday() + 1) % 7)
     end = last + datetime.timedelta(days=(5 - last.weekday()) % 7)
-    weeks, cur = [], start
+    weeks = []
     while cur <= end:
         week = []
         for _ in range(7):
@@ -3900,11 +3907,9 @@ def schedule_calendar(request: Request, month: str = "", user=Depends(require_us
                          "entries": days.get(cur.isoformat(), [])})
             cur += datetime.timedelta(days=1)
         weeks.append(week)
-    return templates.TemplateResponse(request, "calendar.html", {"user": user, "weeks": weeks,
-        "month_label": first.strftime("%B %Y"), "prev": prv.strftime("%Y-%m"),
-        "next": nxt.strftime("%Y-%m"), "this_month": datetime.date.today().strftime("%Y-%m"),
-        "today": datetime.date.today().isoformat(),
-        "n": sum(len(v) for v in days.values())})
+    return {"weeks": weeks, "label": first.strftime("%B %Y"), "prev": prv.strftime("%Y-%m"),
+            "next": nxt.strftime("%Y-%m"), "this_month": datetime.date.today().strftime("%Y-%m"),
+            "n": sum(len(v) for v in days.values())}
 
 @app.get("/schedule/timeline", response_class=HTMLResponse)
 def schedule_timeline(request: Request, show: str = "open", avl: int = 0, owner: int = 0,

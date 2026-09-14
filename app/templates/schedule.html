@@ -1,9 +1,7 @@
 {% extends "base.html" %}{% block body %}
 <div class="row" style="justify-content:space-between;align-items:baseline">
 <h2>Schedule</h2>
-<span class="row">
-<a class="btn small ghost" href="/schedule/calendar">Calendar view</a>
-<a class="btn small ghost" href="/schedule/timeline?show={{ show }}&amp;avl={{ sel_a }}&amp;owner={{ sel_o }}">Timeline view</a></span></div>
+<a class="btn small ghost" href="/schedule/timeline?show={{ show }}&amp;avl={{ sel_a }}&amp;owner={{ sel_o }}">Timeline view</a></div>
 <p class="hint">What we have committed to, and by when. A commitment belongs to a product &times; TPO
 &mdash; several can be in flight at once &mdash; and is shown against what is actually outstanding, so a
 date can be read alongside the work behind it rather than on its own.</p>
@@ -111,4 +109,40 @@ date can be read alongside the work behind it rather than on its own.</p>
 7 days before the commitment, leaving any that already have one alone. That is what turns a date into a plan
 you can work &mdash; those requirements then appear in the <a href="/dataroom/queue">requirement queue</a>
 and go red when late.</p></div>
+
+<div class="card">
+<div class="row" style="justify-content:space-between;align-items:baseline;margin-bottom:8px">
+<h3 style="margin:0">{{ cal.label }}</h3>
+<span class="row">
+<a class="btn small ghost" href="/schedule?show={{ show }}&amp;avl={{ sel_a }}&amp;owner={{ sel_o }}&amp;month={{ cal.prev }}#cal">&larr; Previous</a>
+<a class="btn small ghost" href="/schedule?show={{ show }}&amp;avl={{ sel_a }}&amp;owner={{ sel_o }}&amp;month={{ cal.this_month }}#cal">This month</a>
+<a class="btn small ghost" href="/schedule?show={{ show }}&amp;avl={{ sel_a }}&amp;owner={{ sel_o }}&amp;month={{ cal.next }}#cal">Next &rarr;</a>
+<span class="sub2" style="align-self:center">{{ cal.n }} item{{ '' if cal.n == 1 else 's' }}</span>
+</span></div>
+<p class="hint" id="cal">Committed dates, calls, and actions falling due &mdash; past, this week and
+ahead. It follows the <b>TPO filter</b> above, but not the status or owner ones: those describe
+commitments, and this also carries calls and actions.</p>
+<div class="scroll">
+<table class="cal">
+<tr>{% for d in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] %}<th>{{ d }}</th>{% endfor %}</tr>
+{% for week in cal.weeks %}<tr>
+{% for day in week %}
+<td class="{{ 'out' if not day.inmonth }}{{ ' today' if day.iso == today }}">
+  <div class="dnum">{{ day.date.day }}{% if day.iso == today %} <span class="chip">today</span>{% endif %}</div>
+  {% for e in day.entries %}
+  <a class="ev ev-{{ e.kind }} evs-{{ e.status|replace(' ','') }}" href="{{ e.href }}"
+     title="{{ e.title }} &mdash; {{ e.where }}{% if e.who %} ({{ e.who }}){% endif %}">
+    <b>{{ e.where }}</b><span>{{ e.title }}</span></a>
+  {% endfor %}
+</td>{% endfor %}
+</tr>{% endfor %}
+</table></div>
+<p class="hint" style="margin-top:8px">
+<span class="key ev-commitment"></span> committed date &nbsp;
+<span class="key ev-call"></span> call &nbsp;
+<span class="key ev-action"></span> action due &nbsp;
+&mdash; met, held or closed is faded. Click one to open its record. Requirement due dates are left
+off: <b>Date work</b> sets dozens at once and they would bury the rest &mdash; those live in the
+<a href="/dataroom/queue">requirement queue</a>.</p>
+</div>
 {% endblock %}
