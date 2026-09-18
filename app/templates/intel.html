@@ -1,0 +1,78 @@
+{% extends "base.html" %}{% block body %}
+<h2>TPO intelligence &mdash; where they fund, and how</h2>
+<p class="hint">Which financiers fund projects in which states, and what they offer there. Held per
+state rather than per financier because it genuinely differs: third-party ownership is restricted or
+blocked outright in some states, so the same TPO can offer a PPA in one and be loan-only in the next.
+Account managers and CE reps keep it current from <a href="/intel">each account's page</a>.</p>
+
+<div class="kpis">
+<div class="kpi"><div class="n">{{ mx.n_states }}</div>states covered by someone</div>
+<div class="kpi"><div class="n">{{ mx.avls|length }}</div>financiers</div>
+<div class="kpi"><div class="n">{{ mx.per_avl|sum }}</div>TPO&times;state pairs recorded</div>
+</div>
+
+<div class="row" style="margin-bottom:10px">
+<a class="btn small ghost" href="/intel?gaps={{ 0 if gaps else 1 }}">
+  {{ 'Hide states nobody covers' if gaps else 'Show states nobody covers' }}</a>
+<span class="sub2" style="align-self:center">
+  {{ 'Every state is listed, so an empty row is a gap.' if gaps
+     else 'Only states somebody funds in. Switch to see the gaps.' }}</span>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden"><div class="scroll">
+<table class="cov">
+<thead><tr><th class="stname">State</th>
+{% for a in mx.avls %}<th><a href="/intel/{{ a.id }}">{{ a.name }}</a>
+  <div class="sub">{{ mx.per_avl[loop.index0] }} states</div></th>{% endfor %}</tr></thead>
+<tbody>
+{% for r in mx.rows %}<tr>
+<td class="stname">{{ r.name }} <span class="sub2">{{ r.code }}</span>
+  {% if not r.covered %}<span class="chip gen">gap</span>{% endif %}</td>
+{% for cell in r.cells %}
+{% set a = mx.avls[loop.index0] %}
+<td class="cv {{ 'cv-' ~ cell.status if cell else '' }}">
+  {% if cell %}<a href="/intel/{{ a.id }}#{{ r.code }}" title="{{ a.name }} &mdash; {{ r.name }}: {{ cell.status }}{% if cell.funding %} ({{ cell.funding }}){% endif %}{% if cell.notes %} &mdash; {{ cell.notes }}{% endif %}">
+    {% for f in cell.funding.split(',') if f.strip() %}<span class="fm">{{ short.get(f.strip(), f.strip()) }}</span>{% else %}<span class="fm none">?</span>{% endfor %}
+  </a>{% endif %}
+</td>{% endfor %}
+</tr>{% endfor %}
+{% if not mx.rows %}<tr><td colspan="{{ mx.avls|length + 1 }}" class="hint">
+Nothing recorded yet. Open a financier above and add the states it funds in.</td></tr>{% endif %}
+</tbody></table>
+</div></div>
+
+<p class="hint">
+<span class="key cv-Active"></span> active &nbsp;
+<span class="key cv-Planned"></span> planned &nbsp;
+<span class="key cv-Paused"></span> paused &nbsp;
+<span class="key cv-Exited"></span> exited &nbsp;&mdash;&nbsp;
+{% for m in methods %}<b>{{ short[m] }}</b> {{ m }}{% if not loop.last %} &middot; {% endif %}{% endfor %}.
+A cell showing <b>?</b> means we know they fund there but not how.</p>
+
+<div class="cols">
+<div class="card"><h3>How current is each account</h3>
+<table class="list"><tr><th>Financier</th><th>States</th><th>Last updated</th><th></th></tr>
+{% for st in stale %}<tr>
+<td><b>{{ st.name }}</b></td>
+<td class="sub2">{{ st.n or 0 }}</td>
+<td class="sub2">{% if st.last %}{{ st.last[:10] }}{% else %}<span class="err">never</span>{% endif %}</td>
+<td><a class="btn small ghost" href="/intel/{{ st.id }}">Update</a></td>
+</tr>{% endfor %}</table>
+<p class="hint">There is no feed for this &mdash; somebody has to ask. A row nobody has touched is the
+one to distrust, which is why the date is here rather than hidden.</p></div>
+
+<div class="card"><h3>Recent changes</h3>
+<table class="list"><tr><th>When</th><th>Financier</th><th>State</th><th>Change</th><th>By</th></tr>
+{% for h in recent %}<tr>
+<td class="sub2">{{ h.ts[:10] }}</td>
+<td><a href="/intel/{{ h.avl_id }}#{{ h.state }}">{{ h.avl_name }}</a></td>
+<td>{{ state_name.get(h.state, h.state) }}</td>
+<td class="sub2">
+  {% if h.old_status != h.new_status %}{{ h.old_status or 'not recorded' }} &rarr; <b>{{ h.new_status }}</b>{% endif %}
+  {% if h.old_funding != h.new_funding %}<div>{{ h.old_funding or 'no methods' }} &rarr; <b>{{ h.new_funding or 'none' }}</b></div>{% endif %}</td>
+<td class="sub2">{{ h.actor }}</td>
+</tr>{% else %}<tr><td colspan="5" class="hint">No changes recorded yet.</td></tr>{% endfor %}</table>
+<p class="hint">A financier entering or leaving a state is the intelligence, not just the current
+picture &mdash; so every change is kept, with who recorded it.</p></div>
+</div>
+{% endblock %}

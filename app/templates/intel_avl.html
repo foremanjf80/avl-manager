@@ -1,0 +1,69 @@
+{% extends "base.html" %}{% block body %}
+<div class="row" style="justify-content:space-between;align-items:baseline">
+<h2>{{ avl.name }} &mdash; coverage</h2>
+<a class="btn small ghost" href="/intel">All financiers</a></div>
+<p class="hint">Where {{ avl.name }} funds projects and what they offer in each state. Funding methods
+are recorded per state because the state decides them: third-party ownership is restricted or blocked
+in some, so a PPA available in one may simply not exist in the next. Record what you have been told
+and who told you &mdash; a row with a source can be chased when it ages.</p>
+
+<div class="cols">
+<div class="card"><h3>States they fund in</h3>
+{% if rows %}
+<table class="list"><tr><th>State</th><th>Status</th><th>Funding methods</th><th>Source / notes</th><th></th><th></th></tr>
+{% for r in rows %}<tr id="{{ r.state }}">
+<form method="post" action="/intel/{{ avl.id }}/state">
+<input type="hidden" name="state" value="{{ r.state }}">
+<td class="nowrap"><b>{{ state_name.get(r.state, r.state) }}</b>
+  <div class="sub2">{{ r.updated_at[:10] if r.updated_at else '' }}</div></td>
+<td><select name="status">{% for st in statuses %}<option {% if r.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select></td>
+<td>{% set have = funding_list(r.funding) %}
+  {% for m in methods %}<label class="fmbox"><input type="checkbox" name="funding" value="{{ m }}"
+    {% if m in have %}checked{% endif %}> {{ m }}</label>{% endfor %}</td>
+<td><input name="source" value="{{ r.source }}" size="16" placeholder="Who told us">
+  <input name="notes" value="{{ r.notes }}" size="22" placeholder="Notes"></td>
+<td><button>Save</button></td></form>
+<td><form method="post" action="/intel/{{ avl.id }}/state/{{ r.state }}/delete" class="inline"
+    onsubmit="return confirm('Remove {{ state_name.get(r.state, r.state) }} from {{ avl.name }}? If they used to fund there and stopped, set the status to Exited instead so the change is kept.')">
+  <button class="chipx" title="Remove this row">&times;</button></form></td>
+</tr>{% endfor %}</table>
+{% else %}
+<p class="hint">No states recorded for {{ avl.name }} yet.</p>
+{% endif %}
+
+<h3>Add a state</h3>
+{% if addable %}
+<form method="post" action="/intel/{{ avl.id }}/state" class="row">
+<select name="state" required>{% for code, name in addable %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select>
+<select name="status">{% for st in statuses %}<option>{{ st }}</option>{% endfor %}</select>
+{% for m in methods %}<label class="fmbox"><input type="checkbox" name="funding" value="{{ m }}"> {{ m }}</label>{% endfor %}
+<input name="source" placeholder="Who told us" size="16">
+<input name="notes" placeholder="Notes" size="20">
+<button>Add</button></form>
+<p class="hint">Leave the methods blank if you know they fund there but not how &mdash; the matrix
+shows that as <b>?</b>, which is honest and findable later.</p>
+{% else %}<p class="hint">Every state is already recorded for {{ avl.name }}.</p>{% endif %}
+</div>
+
+<div class="card"><h3>What they fund of ours</h3>
+<table class="list"><tr><th>Product</th><th>Category</th><th>Status</th></tr>
+{% for p in products %}<tr><td><b>{{ p.name }}</b></td><td class="sub2">{{ p.category }}</td>
+<td><span class="ls ls-{{ p.status|replace(' ','')|replace(',','')|replace('/','') }}">{{ p.status }}</span></td>
+</tr>{% else %}<tr><td colspan="3" class="hint">Nothing listed or in pursuit at {{ avl.name }} yet.</td></tr>{% endfor %}</table>
+<p class="hint">Read from the listings rather than entered again here &mdash; the
+<a href="/">dashboard</a> is where that changes. System configurations they deploy (PV, PV+ESS,
+backup) are not tracked yet; they will land beside this when they are.</p>
+
+<h3>Change history</h3>
+<table class="list"><tr><th>When</th><th>State</th><th>Change</th><th>By</th></tr>
+{% for h in history %}<tr>
+<td class="sub2">{{ h.ts[:10] }}</td>
+<td>{{ state_name.get(h.state, h.state) }}</td>
+<td class="sub2">
+  {% if h.old_status != h.new_status %}{{ h.old_status or 'not recorded' }} &rarr; <b>{{ h.new_status }}</b>{% endif %}
+  {% if h.old_funding != h.new_funding %}<div>{{ h.old_funding or 'no methods' }} &rarr; <b>{{ h.new_funding or 'none' }}</b></div>{% endif %}</td>
+<td class="sub2">{{ h.actor }}</td>
+</tr>{% else %}<tr><td colspan="4" class="hint">No changes recorded yet.</td></tr>{% endfor %}</table>
+</div>
+</div>
+{% endblock %}

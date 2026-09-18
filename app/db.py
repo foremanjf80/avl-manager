@@ -570,6 +570,31 @@ CREATE INDEX IF NOT EXISTS ix_packages_pa ON packages(product_id, avl_id);
 -- Which products a call is about. A call is scheduled against a TPO, but who
 -- needs to be in the room is decided by the products on the agenda: the account
 -- seats belong to the TPO, the technical seats belong to each product.
+-- Where each financier funds, and how. One row per (TPO, state) because the
+-- funding methods available genuinely differ state by state.
+CREATE TABLE IF NOT EXISTS avl_states(
+  id INTEGER PRIMARY KEY,
+  avl_id INTEGER NOT NULL REFERENCES avls(id) ON DELETE CASCADE,
+  state TEXT NOT NULL,
+  status TEXT DEFAULT 'Active',
+  funding TEXT DEFAULT '',             -- comma-separated, from FUNDING_METHODS
+  notes TEXT DEFAULT '',
+  source TEXT DEFAULT '',              -- who told us, so a stale row can be chased
+  updated_by TEXT, updated_at TEXT,
+  UNIQUE(avl_id, state));
+CREATE INDEX IF NOT EXISTS ix_avlst ON avl_states(state);
+
+-- Coverage changes are the intelligence, not just the current picture: a
+-- financier entering or leaving a state is the event worth knowing about.
+CREATE TABLE IF NOT EXISTS avl_state_history(
+  id INTEGER PRIMARY KEY,
+  avl_id INTEGER NOT NULL REFERENCES avls(id) ON DELETE CASCADE,
+  state TEXT NOT NULL,
+  old_status TEXT DEFAULT '', new_status TEXT DEFAULT '',
+  old_funding TEXT DEFAULT '', new_funding TEXT DEFAULT '',
+  actor TEXT, ts TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_avlsth ON avl_state_history(avl_id, id DESC);
+
 CREATE TABLE IF NOT EXISTS call_products(
   call_id INTEGER NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
   product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
@@ -838,6 +863,94 @@ def scope_filter(scope):
 # Attendees are picked from the Qcells roster and the TPO contact list, with a
 # free-text field for one-off guests. The names stay denormalised onto calls so
 # the CSV export and weekly digest keep working unchanged.
+# ---------------- TPO market intelligence: where they fund, and how ----------
+# Coverage is held per (TPO, state) rather than per TPO, because third-party
+# ownership is restricted or blocked outright in some states - the same
+# financier can offer a PPA in one and be loan-only in the next. That is a legal
+# fact about the state, not a preference, so it cannot live on the account.
+US_STATES = [
+    ("AL", "Alabama"), ("AK", "Alaska"), ("AZ", "Arizona"), ("AR", "Arkansas"),
+    ("CA", "California"), ("CO", "Colorado"), ("CT", "Connecticut"), ("DE", "Delaware"),
+    ("DC", "District of Columbia"), ("FL", "Florida"), ("GA", "Georgia"), ("HI", "Hawaii"),
+    ("ID", "Idaho"), ("IL", "Illinois"), ("IN", "Indiana"), ("IA", "Iowa"),
+    ("KS", "Kansas"), ("KY", "Kentucky"), ("LA", "Louisiana"), ("ME", "Maine"),
+    ("MD", "Maryland"), ("MA", "Massachusetts"), ("MI", "Michigan"), ("MN", "Minnesota"),
+    ("MS", "Mississippi"), ("MO", "Missouri"), ("MT", "Montana"), ("NE", "Nebraska"),
+    ("NV", "Nevada"), ("NH", "New Hampshire"), ("NJ", "New Jersey"), ("NM", "New Mexico"),
+    ("NY", "New York"), ("NC", "North Carolina"), ("ND", "North Dakota"), ("OH", "Ohio"),
+    ("OK", "Oklahoma"), ("OR", "Oregon"), ("PA", "Pennsylvania"), ("PR", "Puerto Rico"),
+    ("RI", "Rhode Island"), ("SC", "South Carolina"), ("SD", "South Dakota"),
+    ("TN", "Tennessee"), ("TX", "Texas"), ("UT", "Utah"), ("VT", "Vermont"),
+    ("VA", "Virginia"), ("WA", "Washington"), ("WV", "West Virginia"),
+    ("WI", "Wisconsin"), ("WY", "Wyoming"),
+]
+STATE_NAME = dict(US_STATES)
+
+FUNDING_METHODS = ["Loan", "Lease", "PPA", "Prepaid lease", "Cash"]
+# Short forms for the matrix, where a cell has room for a few characters and not
+# a few words.
+FUNDING_SHORT = {"Loan": "L", "Lease": "LS", "PPA": "P", "Prepaid lease": "PP", "Cash": "C"}
+COVERAGE_STATUSES = ["Active", "Planned", "Paused", "Exited"]
+COVERED_STATUSES = ("Active", "Planned")
+
+def funding_list(raw):
+    """The stored comma-separated funding methods, back as a clean list."""
+    return [f.strip() for f in (raw or "").split(",") if f.strip() in FUNDING_METHODS]
+
+def set_avl_state(c, avl_id, state, status, funding, notes, source, actor):
+    """Upsert one (TPO, state) row and record what actually changed.
+
+    History is written only on a real change, so the trail stays readable: an
+    account manager re-saving a row they did not alter should not create an
+    entry that looks like news.
+    """
+    status = status if status in COVERAGE_STATUSES else "Active"
+    funding = ", ".join(f for f in FUNDING_METHODS if f in funding_list(",".join(funding)))
+    prev = c.execute("SELECT * FROM avl_states WHERE avl_id=? AND state=?",
+                     (avl_id, state)).fetchone()
+    ts = datetime.datetime.now().isoformat(timespec="seconds")
+    if prev:
+        c.execute("UPDATE avl_states SET status=?, funding=?, notes=?, source=?, "
+                  "updated_by=?, updated_at=? WHERE id=?",
+                  (status, funding, notes.strip(), source.strip(), actor, ts, prev["id"]))
+    else:
+        c.execute("INSERT INTO avl_states(avl_id, state, status, funding, notes, source, "
+                  "updated_by, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                  (avl_id, state, status, funding, notes.strip(), source.strip(), actor, ts))
+    old_status = prev["status"] if prev else ""
+    old_funding = prev["funding"] if prev else ""
+    if old_status != status or old_funding != funding:
+        c.execute("INSERT INTO avl_state_history(avl_id, state, old_status, new_status, "
+                  "old_funding, new_funding, actor, ts) VALUES(?,?,?,?,?,?,?,?)",
+                  (avl_id, state, old_status, status, old_funding, funding, actor, ts))
+        return True
+    return False
+
+def coverage_matrix(c, include_empty=False):
+    """States down, TPOs across - the reading view of who funds where.
+
+    Only states somebody covers, unless asked otherwise: the empty rows are the
+    gap analysis, which is a different question and worth opting into rather
+    than scrolling past fifty times.
+    """
+    avls = c.execute("SELECT id, name FROM avls WHERE active=1 ORDER BY name").fetchall()
+    cells = {}
+    for r in c.execute("SELECT * FROM avl_states"):
+        cells[(r["state"], r["avl_id"])] = r
+    rows = []
+    for code, name in US_STATES:
+        here = [cells.get((code, a["id"])) for a in avls]
+        covered = sum(1 for x in here if x and x["status"] in COVERED_STATUSES)
+        if covered or include_empty or any(here):
+            rows.append({"code": code, "name": name, "cells": here, "covered": covered})
+    per_avl = [sum(1 for code, _ in US_STATES
+                   if (cells.get((code, a["id"])) or {})
+                   and cells[(code, a["id"])]["status"] in COVERED_STATUSES)
+               for a in avls]
+    return {"avls": avls, "rows": rows, "per_avl": per_avl,
+            "n_states": sum(1 for r in rows if r["covered"])}
+
+
 CALL_TYPES = ["Joint", "Technical", "Commercial", "Intro", "QBR", "Escalation", "Site visit"]
 
 # A call is either still to happen or has happened. Everything logged before this

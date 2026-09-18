@@ -2391,6 +2391,81 @@ def preview(att_id: int, request: Request, user=Depends(require_user)):
         "Content-Disposition": f'inline; filename="{_safe(row["filename"])}"',
         "X-Content-Type-Options": "nosniff"})
 
+# ---------------- TPO market intelligence ----------------
+@app.get("/intel", response_class=HTMLResponse)
+def intel(request: Request, gaps: int = 0, user=Depends(require_user)):
+    """Who funds where, read as a grid: states down, financiers across."""
+    c = db.conn()
+    mx = db.coverage_matrix(c, include_empty=bool(gaps))
+    recent = c.execute(
+        "SELECT h.*, a.name AS avl_name FROM avl_state_history h "
+        "JOIN avls a ON a.id=h.avl_id ORDER BY h.id DESC LIMIT 25").fetchall()
+    stale = c.execute(
+        "SELECT a.id, a.name, COUNT(s.id) AS n, MAX(s.updated_at) AS last "
+        "FROM avls a LEFT JOIN avl_states s ON s.avl_id=a.id "
+        "WHERE a.active=1 GROUP BY a.id ORDER BY a.name").fetchall()
+    c.close()
+    return templates.TemplateResponse(request, "intel.html", {"user": user, "mx": mx,
+        "recent": recent, "stale": stale, "gaps": gaps, "short": db.FUNDING_SHORT,
+        "state_name": db.STATE_NAME, "methods": db.FUNDING_METHODS,
+        "statuses": db.COVERAGE_STATUSES})
+
+@app.get("/intel/{aid}", response_class=HTMLResponse)
+def intel_avl(aid: int, request: Request, user=Depends(require_user)):
+    """One financier: the states it funds in, and what it offers in each."""
+    c = db.conn()
+    avl = c.execute("SELECT * FROM avls WHERE id=?", (aid,)).fetchone()
+    if not avl:
+        c.close()
+        return RedirectResponse("/intel", status_code=303)
+    rows = c.execute("SELECT * FROM avl_states WHERE avl_id=? ORDER BY state", (aid,)).fetchall()
+    have = {r["state"] for r in rows}
+    # What they already fund of ours, read from the listings rather than typed
+    # again here - one answer to that question is enough.
+    qs = ",".join("?" * len(db.IN_PLAY_STATUSES))
+    products = c.execute(
+        f"SELECT p.name, p.category, l.status FROM listings l JOIN products p ON p.id=l.product_id "
+        f"WHERE l.avl_id=? AND p.active=1 AND l.status IN ({qs}) ORDER BY p.category, p.name",
+        [aid, *db.IN_PLAY_STATUSES]).fetchall()
+    history = c.execute("SELECT * FROM avl_state_history WHERE avl_id=? ORDER BY id DESC LIMIT 30",
+                        (aid,)).fetchall()
+    c.close()
+    return templates.TemplateResponse(request, "intel_avl.html", {"user": user, "avl": avl,
+        "rows": rows, "products": products, "history": history,
+        "addable": [(code, name) for code, name in db.US_STATES if code not in have],
+        "methods": db.FUNDING_METHODS, "statuses": db.COVERAGE_STATUSES,
+        "state_name": db.STATE_NAME, "funding_list": db.funding_list})
+
+@app.post("/intel/{aid}/state")
+def intel_save_state(aid: int, request: Request, state: str = Form(...),
+                     status: str = Form("Active"), funding: list[str] = Form(default=[]),
+                     notes: str = Form(""), source: str = Form(""),
+                     user=Depends(require_editor)):
+    if state not in db.STATE_NAME:
+        return RedirectResponse(f"/intel/{aid}", status_code=303)
+    c = db.conn()
+    if not c.execute("SELECT 1 FROM avls WHERE id=?", (aid,)).fetchone():
+        c.close()
+        return RedirectResponse("/intel", status_code=303)
+    changed = db.set_avl_state(c, aid, state, status, funding, notes, source, user["email"])
+    name = c.execute("SELECT name FROM avls WHERE id=?", (aid,)).fetchone()["name"]
+    c.commit(); c.close()
+    if changed:
+        db.log(user["email"], "coverage:set",
+               f"{name} / {db.STATE_NAME[state]} -> {status}"
+               + (f" ({', '.join(funding)})" if funding else ""), avl_id=aid, entity="coverage")
+    return RedirectResponse(f"/intel/{aid}#{state}", status_code=303)
+
+@app.post("/intel/{aid}/state/{state}/delete")
+def intel_delete_state(aid: int, state: str, request: Request, user=Depends(require_editor)):
+    """Remove a state we should never have recorded. Leaving is Exited, not this."""
+    c = db.conn()
+    c.execute("DELETE FROM avl_states WHERE avl_id=? AND state=?", (aid, state))
+    c.commit(); c.close()
+    db.log(user["email"], "coverage:remove", f"{db.STATE_NAME.get(state, state)}",
+           avl_id=aid, entity="coverage")
+    return RedirectResponse(f"/intel/{aid}", status_code=303)
+
 # ---------------- 10) TPO-side contacts ----------------
 @app.get("/contacts", response_class=HTMLResponse)
 def contacts(request: Request, avl: int = 0, show_inactive: int = 0, q: str = "",

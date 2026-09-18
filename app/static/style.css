@@ -283,3 +283,25 @@ table.cal td.today{box-shadow:inset 0 0 0 2px var(--navy)}
 /* Done is still worth seeing, just not competing with what is still open. */
 .evs-Met,.evs-Held,.evs-Done,.evs-Closed,.evs-Cancelled{opacity:.45}
 .key{display:inline-block;width:22px;height:10px;border-radius:5px;vertical-align:middle}
+
+/* Coverage matrix: states down, financiers across. Narrower cells than the
+   product grid because a cell holds two or three letters, not a status. */
+table.cov{border-collapse:collapse;font-size:13.5px;min-width:820px}
+table.cov th,table.cov td{border:1px solid #c9c9c9;padding:3px 5px;text-align:center}
+table.cov thead th{background:var(--navy);color:#fff;position:sticky;top:0;font-size:13px;
+  min-width:78px;vertical-align:top}
+table.cov thead th a{color:#fff;text-decoration:none}
+table.cov .stname{text-align:left;font-weight:bold;color:var(--navy);min-width:172px;
+  white-space:nowrap;background:#fff}
+table.cov .stname .sub2{font-weight:normal}
+table.cov td.cv{padding:2px}
+.cv a{display:block;text-decoration:none;padding:2px 1px}
+.fm{display:inline-block;background:rgba(255,255,255,.75);color:#1b1b1b;font-weight:bold;
+  border-radius:3px;padding:0 3px;margin:0 1px;font-size:12px}
+.fm.none{background:none;color:#5a4a00}
+/* Status colours the cell; the funding letters sit on top of it. */
+.cv-Active{background:#C6EFCE}.cv-Planned{background:#BDD7EE}
+.cv-Paused{background:#FFF2CC}.cv-Exited{background:#EDEDED;opacity:.7}
+.fmbox{display:inline-flex;align-items:center;gap:3px;margin:0 7px 0 0;font-size:13px;
+  white-space:nowrap}
+.fmbox input{margin:0}

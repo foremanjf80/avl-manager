@@ -977,3 +977,34 @@ Month navigation stays on the page and returns to the calendar rather than the
 top of it. The grid follows the **TPO filter** above it, so narrowing to one
 account narrows the month too - but not the status or owner filters, which
 describe commitments, while the grid also carries calls and actions.
+
+## v48 - Intel: where each financier funds, and how
+A new tab, and new tables that nothing existing reads - the pursuit workflow
+(listings, checklists, commitments, dataroom, IE) is untouched by design.
+
+Coverage is held per **(TPO, state)**, not per TPO, because the funding methods
+available genuinely differ state by state: third-party ownership is restricted or
+blocked outright in some, so the same financier can offer a PPA in one and be
+loan-only in the next. That is a fact about the state's law, not a preference,
+and it cannot live on the account record.
+
+**Read** as a matrix - states down, financiers across, cell coloured by status
+(active / planned / paused / exited) and carrying the funding methods as short
+codes. A cell showing **?** means we know they fund there but not how, which is
+honest and findable. "Show states nobody covers" turns the grid into a gap
+analysis.
+
+**Edit** per financier: the states they fund in, each with a status, funding
+checkboxes, a **source** and notes. Account managers and CE reps keep it current.
+
+**Changes are kept.** A financier entering or leaving a state is the intelligence,
+not just the current picture, so every change is recorded with who recorded it -
+but only real changes, so re-saving an untouched row does not create news.
+
+Because there is no feed for any of this, the main page carries a freshness table
+showing when each account was last updated, with **never** in red. A row nobody
+has touched is the one to distrust.
+
+What they fund *of ours* is read from the listings rather than typed again.
+System configurations they deploy (PV, PV+ESS, backup) are not tracked yet and
+will sit beside that when they are.
